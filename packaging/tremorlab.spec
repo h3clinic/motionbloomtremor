@@ -41,7 +41,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon=None,
+    icon="Assets/TremorLab.ico",
 )
 
 coll = COLLECT(
@@ -60,7 +60,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="TremorLab.app",
-        icon=None,
+        icon="Assets/TremorLab.icns",
         bundle_identifier="com.motionbloom.tremorlab",
         info_plist={
             "NSCameraUsageDescription": "TremorLab uses the camera to analyze hand tremor locally on your device.",
