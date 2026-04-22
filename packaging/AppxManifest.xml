@@ -8,11 +8,11 @@
   <Identity
     Name="QuesifyNetInc.MotionBloom"
     Publisher="CN=21B875D6-F7A8-485D-8319-3615B5FABDEE"
-    Version="0.1.0.0"
+    Version="0.1.1.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>MotionBloom TremorLab</DisplayName>
+    <DisplayName>MotionBloom</DisplayName>
     <PublisherDisplayName>Quesify Net Inc.</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Real-time hand tremor detector. Local-only, no data leaves your device.</Description>
@@ -29,7 +29,7 @@
   <Applications>
     <Application Id="TremorLab" Executable="TremorLab.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="MotionBloom TremorLab"
+        DisplayName="MotionBloom"
         Description="Real-time hand tremor detector"
         BackgroundColor="#FFFFFF"
         Square150x150Logo="Assets\Square150x150Logo.png"
