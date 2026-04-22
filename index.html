@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Real-Time Tremor Detector</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #171c24;
+    --accent: #4cc9f0;
+    --ok: #2ecc71;
+    --warn: #f1c40f;
+    --bad: #e74c3c;
+    --text: #e6edf3;
+    --muted: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 24px;
+    border-bottom: 1px solid #242a33;
+  }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    gap: 16px;
+    padding: 16px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .video-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    aspect-ratio: 4 / 3;
+  }
+  video, canvas.overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    transform: scaleX(-1); /* mirror */
+  }
+  video { object-fit: cover; }
+  .panel {
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted); font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; }
+  .metric {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid #242a33;
+  }
+  .metric:last-child { border-bottom: none; }
+  .metric .label { color: var(--muted); font-size: 13px; }
+  .metric .value { font-variant-numeric: tabular-nums; font-size: 18px; font-weight: 600; }
+  .status {
+    padding: 12px;
+    border-radius: 8px;
+    text-align: center;
+    font-weight: 600;
+    margin-bottom: 12px;
+    background: #242a33;
+  }
+  .status.ok { background: rgba(46, 204, 113, 0.15); color: var(--ok); }
+  .status.warn { background: rgba(241, 196, 15, 0.15); color: var(--warn); }
+  .status.bad { background: rgba(231, 76, 60, 0.15); color: var(--bad); }
+  .controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 12px;
+  }
+  button {
+    background: var(--accent);
+    color: #0e1116;
+    border: none;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button.secondary {
+    background: #242a33;
+    color: var(--text);
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  select {
+    background: #242a33;
+    color: var(--text);
+    border: 1px solid #333b47;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .spectrum {
+    width: 100%;
+    height: 120px;
+    background: #0b0e13;
+    border-radius: 8px;
+    margin-top: 8px;
+  }
+  .hint {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 12px;
+    line-height: 1.5;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    background: #242a33;
+    color: var(--muted);
+    margin-left: 6px;
+  }
+  .badge.live { background: rgba(46, 204, 113, 0.2); color: var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Real-Time Tremor Detector <span id="liveBadge" class="badge">idle</span></h1>
+  <p>Uses your webcam and MediaPipe Hands to estimate tremor frequency (Hz) and amplitude from fingertip motion. Runs fully in your browser — no video leaves your device.</p>
+</header>
+
+<main>
+  <div class="video-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay" class="overlay"></canvas>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Status</h2>
+      <div id="status" class="status">Waiting to start…</div>
+      <div class="metric">
+        <span class="label">Dominant frequency</span>
+        <span class="value" id="freq">— Hz</span>
+      </div>
+      <div class="metric">
+        <span class="label">Amplitude (norm.)</span>
+        <span class="value" id="amp">—</span>
+      </div>
+      <div class="metric">
+        <span class="label">Tremor score (0–100)</span>
+        <span class="value" id="score">—</span>
+      </div>
+      <div class="metric">
+        <span class="label">Sample rate</span>
+        <span class="value" id="fps">— Hz</span>
+      </div>
+      <div class="metric">
+        <span class="label">Hand detected</span>
+        <span class="value" id="hand">No</span>
+      </div>
+
+      <div class="controls">
+        <button id="startBtn">Start camera</button>
+        <button id="stopBtn" class="secondary" disabled>Stop</button>
+        <select id="tracked">
+          <option value="8">Index fingertip</option>
+          <option value="12">Middle fingertip</option>
+          <option value="4">Thumb tip</option>
+          <option value="0">Wrist</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <h2>Motion spectrum (1–15 Hz)</h2>
+      <canvas id="spectrum" class="spectrum"></canvas>
+      <div class="hint">
+        Hold your hand steady in front of the camera (palm facing the lens, ~40–60 cm away) with good lighting.
+        Tremor is detected as oscillatory motion in the 3–12 Hz range. Typical essential / Parkinsonian tremor: 4–7 Hz.
+        <br><br>
+        <strong>Disclaimer:</strong> This is a technical demo, not a medical device. Consult a clinician for diagnosis.
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- MediaPipe Hands via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const octx = overlay.getContext('2d');
+  const spectrumCanvas = document.getElementById('spectrum');
+  const sctx = spectrumCanvas.getContext('2d');
+
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+  const trackedSel = document.getElementById('tracked');
+
+  const freqEl = document.getElementById('freq');
+  const ampEl = document.getElementById('amp');
+  const scoreEl = document.getElementById('score');
+  const fpsEl = document.getElementById('fps');
+  const handEl = document.getElementById('hand');
+  const statusEl = document.getElementById('status');
+  const liveBadge = document.getElementById('liveBadge');
+
+  // Circular buffer for fingertip positions
+  const WINDOW_SECONDS = 3;       // analysis window
+  const MAX_SAMPLES = 512;        // up to ~15s at 30fps; we slice to window
+  const samples = [];             // { t, x, y }
+  let camera = null;
+  let hands = null;
+  let running = false;
+  let handPresent = false;
+
+  function resizeOverlay() {
+    const rect = overlay.getBoundingClientRect();
+    overlay.width = rect.width * devicePixelRatio;
+    overlay.height = rect.height * devicePixelRatio;
+    spectrumCanvas.width = spectrumCanvas.getBoundingClientRect().width * devicePixelRatio;
+    spectrumCanvas.height = spectrumCanvas.getBoundingClientRect().height * devicePixelRatio;
+  }
+  window.addEventListener('resize', resizeOverlay);
+
+  function onResults(results) {
+    // Draw overlay
+    octx.save();
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+
+    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+      handPresent = true;
+      handEl.textContent = 'Yes';
+      const lm = results.multiHandLandmarks[0];
+      const idx = parseInt(trackedSel.value, 10);
+      const pt = lm[idx];
+      // Record normalized (0..1) coordinates with timestamp
+      const t = performance.now() / 1000;
+      samples.push({ t, x: pt.x, y: pt.y });
+      // Trim to window
+      const cutoff = t - 15;
+      while (samples.length && samples[0].t < cutoff) samples.shift();
+      if (samples.length > MAX_SAMPLES) samples.splice(0, samples.length - MAX_SAMPLES);
+
+      // Draw connectors & landmarks
+      if (window.drawConnectors && window.HAND_CONNECTIONS) {
+        drawConnectors(octx, lm, HAND_CONNECTIONS,
+          { color: '#4cc9f0', lineWidth: 2 * devicePixelRatio });
+        drawLandmarks(octx, lm, { color: '#ffffff', lineWidth: 1, radius: 2 * devicePixelRatio });
+      }
+      // Highlight tracked point
+      const w = overlay.width, h = overlay.height;
+      octx.beginPath();
+      octx.arc(pt.x * w, pt.y * h, 8 * devicePixelRatio, 0, Math.PI * 2);
+      octx.fillStyle = '#f72585';
+      octx.fill();
+    } else {
+      handPresent = false;
+      handEl.textContent = 'No';
+    }
+    octx.restore();
+  }
+
+  // ---------- Signal processing ----------
+
+  // Resample irregular samples to uniform dt using linear interpolation
+  function resampleUniform(sig, fs) {
+    if (sig.length < 2) return null;
+    const t0 = sig[0].t, tEnd = sig[sig.length - 1].t;
+    const dur = tEnd - t0;
+    if (dur <= 0) return null;
+    const n = Math.floor(dur * fs);
+    if (n < 16) return null;
+    const xs = new Float32Array(n);
+    const ys = new Float32Array(n);
+    let j = 0;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + i / fs;
+      while (j < sig.length - 2 && sig[j + 1].t < t) j++;
+      const a = sig[j], b = sig[j + 1];
+      const u = (t - a.t) / Math.max(1e-6, (b.t - a.t));
+      xs[i] = a.x + (b.x - a.x) * u;
+      ys[i] = a.y + (b.y - a.y) * u;
+    }
+    return { xs, ys, fs, n, duration: dur };
+  }
+
+  // Remove linear trend
+  function detrend(arr) {
+    const n = arr.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < n; i++) { sx += i; sy += arr[i]; sxx += i * i; sxy += i * arr[i]; }
+    const denom = n * sxx - sx * sx;
+    const m = denom ? (n * sxy - sx * sy) / denom : 0;
+    const b = (sy - m * sx) / n;
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) out[i] = arr[i] - (m * i + b);
+    return out;
+  }
+
+  // Hann window
+  function hann(arr) {
+    const n = arr.length;
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (n - 1)));
+      out[i] = arr[i] * w;
+    }
+    return out;
+  }
+
+  // Goertzel-based power at a single frequency (more stable than DFT for many bins)
+  function goertzelPower(arr, fs, targetHz) {
+    const n = arr.length;
+    const k = (targetHz * n) / fs;
+    const w = (2 * Math.PI * k) / n;
+    const cw = Math.cos(w), sw = Math.sin(w);
+    const coeff = 2 * cw;
+    let s0 = 0, s1 = 0, s2 = 0;
+    for (let i = 0; i < n; i++) {
+      s0 = arr[i] + coeff * s1 - s2;
+      s2 = s1; s1 = s0;
+    }
+    const real = s1 - s2 * cw;
+    const imag = s2 * sw;
+    return (real * real + imag * imag) / (n * n);
+  }
+
+  // Analyse current window
+  function analyse() {
+    if (samples.length < 10) return null;
+    const now = performance.now() / 1000;
+    const windowed = samples.filter(s => s.t >= now - WINDOW_SECONDS);
+    if (windowed.length < 16) return null;
+
+    // Estimate effective sample rate
+    const dur = windowed[windowed.length - 1].t - windowed[0].t;
+    const fsEst = windowed.length / dur;
+    const fs = Math.min(60, Math.max(15, fsEst));
+
+    const resampled = resampleUniform(windowed, fs);
+    if (!resampled) return null;
+
+    // Detrend & window each axis, then combine magnitude
+    const dx = hann(detrend(resampled.xs));
+    const dy = hann(detrend(resampled.ys));
+
+    // Scan 1..15 Hz at 0.25 Hz resolution
+    const freqs = [];
+    const power = [];
+    let total = 0;
+    let bestF = 0, bestP = 0;
+    for (let f = 1; f <= 15; f += 0.25) {
+      const p = goertzelPower(dx, fs, f) + goertzelPower(dy, fs, f);
+      freqs.push(f);
+      power.push(p);
+      total += p;
+      if (f >= 2 && f <= 14 && p > bestP) { bestP = p; bestF = f; }
+    }
+
+    // Amplitude proxy: RMS of detrended signal (normalized coords)
+    let rms = 0;
+    for (let i = 0; i < dx.length; i++) rms += dx[i] * dx[i] + dy[i] * dy[i];
+    rms = Math.sqrt(rms / dx.length);
+
+    // Tremor-band ratio (3–12 Hz) vs total
+    let bandPower = 0;
+    for (let i = 0; i < freqs.length; i++) {
+      if (freqs[i] >= 3 && freqs[i] <= 12) bandPower += power[i];
+    }
+    const bandRatio = total > 0 ? bandPower / total : 0;
+
+    // Score combines amplitude & band concentration. Heuristic, clamped 0..100.
+    // rms in normalized-image units; 0.005 is a decent "just noticeable" floor.
+    const ampNorm = Math.min(1, rms / 0.02);
+    const score = Math.round(100 * Math.min(1, ampNorm * (0.4 + 0.6 * bandRatio)));
+
+    return {
+      fs,
+      sampleCount: windowed.length,
+      dominantHz: bestF,
+      dominantPower: bestP,
+      amplitude: rms,
+      bandRatio,
+      score,
+      freqs,
+      power,
+    };
+  }
+
+  function drawSpectrum(result) {
+    const w = spectrumCanvas.width;
+    const h = spectrumCanvas.height;
+    sctx.clearRect(0, 0, w, h);
+
+    // grid
+    sctx.strokeStyle = '#242a33';
+    sctx.lineWidth = 1;
+    for (let f = 0; f <= 15; f += 2.5) {
+      const x = (f / 15) * w;
+      sctx.beginPath();
+      sctx.moveTo(x, 0); sctx.lineTo(x, h); sctx.stroke();
+      sctx.fillStyle = '#8b949e';
+      sctx.font = `${10 * devicePixelRatio}px -apple-system, sans-serif`;
+      sctx.fillText(f + 'Hz', x + 2, h - 2);
+    }
+
+    if (!result) return;
+    const { freqs, power } = result;
+    const maxP = Math.max(...power, 1e-12);
+
+    // tremor band shading
+    sctx.fillStyle = 'rgba(76, 201, 240, 0.08)';
+    const x1 = (3 / 15) * w, x2 = (12 / 15) * w;
+    sctx.fillRect(x1, 0, x2 - x1, h);
+
+    // spectrum bars
+    sctx.fillStyle = '#4cc9f0';
+    const bw = w / freqs.length;
+    for (let i = 0; i < freqs.length; i++) {
+      const bh = (power[i] / maxP) * (h - 14);
+      sctx.fillRect(i * bw, h - 14 - bh, Math.max(1, bw - 1), bh);
+    }
+
+    // dominant marker
+    if (result.dominantHz) {
+      const x = (result.dominantHz / 15) * w;
+      sctx.strokeStyle = '#f72585';
+      sctx.lineWidth = 2 * devicePixelRatio;
+      sctx.beginPath();
+      sctx.moveTo(x, 0); sctx.lineTo(x, h); sctx.stroke();
+    }
+  }
+
+  function updateStatus(result) {
+    if (!handPresent) {
+      statusEl.className = 'status';
+      statusEl.textContent = 'Show your hand to the camera';
+      freqEl.textContent = '— Hz';
+      ampEl.textContent = '—';
+      scoreEl.textContent = '—';
+      return;
+    }
+    if (!result) {
+      statusEl.className = 'status';
+      statusEl.textContent = 'Collecting samples…';
+      return;
+    }
+    freqEl.textContent = result.dominantHz.toFixed(2) + ' Hz';
+    ampEl.textContent = result.amplitude.toFixed(4);
+    scoreEl.textContent = result.score.toString();
+    fpsEl.textContent = result.fs.toFixed(1) + ' Hz';
+
+    if (result.score < 20) {
+      statusEl.className = 'status ok';
+      statusEl.textContent = 'No significant tremor detected';
+    } else if (result.score < 50) {
+      statusEl.className = 'status warn';
+      statusEl.textContent = `Mild oscillation @ ${result.dominantHz.toFixed(1)} Hz`;
+    } else {
+      statusEl.className = 'status bad';
+      statusEl.textContent = `Tremor-like motion @ ${result.dominantHz.toFixed(1)} Hz`;
+    }
+  }
+
+  let analysisTimer = null;
+  function startAnalysisLoop() {
+    if (analysisTimer) return;
+    analysisTimer = setInterval(() => {
+      const result = analyse();
+      updateStatus(result);
+      drawSpectrum(result);
+    }, 200);
+  }
+  function stopAnalysisLoop() {
+    if (analysisTimer) { clearInterval(analysisTimer); analysisTimer = null; }
+  }
+
+  async function start() {
+    if (running) return;
+    if (!window.Hands) {
+      alert('MediaPipe failed to load. Check your internet connection.');
+      return;
+    }
+    resizeOverlay();
+    hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+    });
+    hands.setOptions({
+      maxNumHands: 1,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6,
+    });
+    hands.onResults(onResults);
+
+    camera = new Camera(video, {
+      onFrame: async () => { await hands.send({ image: video }); },
+      width: 640,
+      height: 480,
+    });
+    try {
+      await camera.start();
+    } catch (err) {
+      alert('Could not access camera: ' + err.message);
+      return;
+    }
+    running = true;
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    liveBadge.textContent = 'live';
+    liveBadge.classList.add('live');
+    startAnalysisLoop();
+  }
+
+  async function stop() {
+    running = false;
+    stopAnalysisLoop();
+    if (camera) { try { camera.stop(); } catch {} camera = null; }
+    if (hands) { try { hands.close(); } catch {} hands = null; }
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
+    samples.length = 0;
+    octx.clearRect(0, 0, overlay.width, overlay.height);
+    sctx.clearRect(0, 0, spectrumCanvas.width, spectrumCanvas.height);
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+    liveBadge.textContent = 'idle';
+    liveBadge.classList.remove('live');
+    statusEl.className = 'status';
+    statusEl.textContent = 'Stopped';
+    freqEl.textContent = '— Hz';
+    ampEl.textContent = '—';
+    scoreEl.textContent = '—';
+    fpsEl.textContent = '— Hz';
+    handEl.textContent = 'No';
+  }
+
+  startBtn.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+  trackedSel.addEventListener('change', () => { samples.length = 0; });
+
+  resizeOverlay();
+})();
+</script>
+</body>
+</html>

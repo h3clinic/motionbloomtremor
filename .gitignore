@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Builds
+build/
+dist/
+*.spec.bak
+*.app/
+*.dmg
+*.pkg
+*.exe
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs / local data
+*.log
+*.csv
+*.mp4
+*.mov
+!assets/**/*.mp4
+!assets/**/*.mov
+
+# Env
+.env
+.env.*
