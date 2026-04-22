@@ -49,10 +49,59 @@ jobs:
             7z a -tzip "../../${{ matrix.artifact }}.zip" "TremorLab" || zip -r "../../${{ matrix.artifact }}.zip" "TremorLab"
           fi
 
+      # --- macOS: codesign + notarize (optional, runs only if secrets present) ---
+      - name: Notarize macOS build
+        if: startsWith(matrix.os, 'macos-') && env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_CERT_P12_BASE64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -e
+          KEYCHAIN=build.keychain
+          security create-keychain -p "" "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+          security unlock-keychain -p "" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12_BASE64" | base64 --decode > cert.p12
+          security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN"
+          APP="packaging/dist/TremorLab.app"
+          codesign --deep --force --options runtime --timestamp \
+            --entitlements packaging/entitlements.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" "$APP"
+          ditto -c -k --keepParent "$APP" notarize.zip
+          xcrun notarytool submit notarize.zip \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "$APP"
+          rm -f "${{ matrix.artifact }}.zip"
+          cd packaging/dist && zip -r "../../${{ matrix.artifact }}.zip" "TremorLab.app"
+
+      # --- Windows: build MSIX for Microsoft Store (optional, needs cert) ---
+      - name: Build MSIX
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |
+                 Where-Object { Test-Path "$($_.FullName)\x64\makeappx.exe" } |
+                 Select-Object -Last 1
+          $makeappx = "$($sdk.FullName)\x64\makeappx.exe"
+          Copy-Item packaging/AppxManifest.xml packaging/dist/TremorLab/AppxManifest.xml
+          if (Test-Path packaging/Assets) {
+            Copy-Item -Recurse packaging/Assets packaging/dist/TremorLab/Assets
+          }
+          & $makeappx pack /d packaging/dist/TremorLab /p "TremorLab-windows-x64.msix" /nv
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.zip
+          path: |
+            ${{ matrix.artifact }}.zip
+            *.msix
+          if-no-files-found: warn
 
   release:
     needs: build
@@ -65,5 +114,7 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*.zip
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.msix
           generate_release_notes: true

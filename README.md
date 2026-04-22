@@ -29,6 +29,14 @@ macOS may prompt for camera permission on first launch. On macOS you also need T
 
 Prebuilt binaries for macOS and Windows are attached to each [GitHub Release](../../releases). Download, unzip, and run — no Python install needed.
 
+## Store distribution
+
+See [packaging/STORES.md](packaging/STORES.md) for step-by-step Microsoft Store (MSIX) submission and Apple notarization setup.
+
+## Privacy
+
+All processing is local. See [PRIVACY.md](PRIVACY.md).
+
 ## Build your own binary
 
 ```bash
