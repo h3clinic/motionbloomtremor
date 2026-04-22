@@ -80,9 +80,9 @@ jobs:
           rm -f "${{ matrix.artifact }}.zip"
           cd packaging/dist && zip -r "../../${{ matrix.artifact }}.zip" "TremorLab.app"
 
-      # --- Windows: build MSIX for Microsoft Store (optional, needs publisher) ---
+      # --- Windows: build MSIX for Microsoft Store ---
       - name: Build MSIX
-        if: matrix.os == 'windows-latest' && vars.MS_PUBLISHER_ID != ''
+        if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Directory |

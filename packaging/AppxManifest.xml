@@ -6,14 +6,14 @@
   IgnorableNamespaces="uap rescap">
 
   <Identity
-    Name="MotionBloom.TremorLab"
-    Publisher="CN=MotionBloom"
+    Name="QuesifyNetInc.MotionBloom"
+    Publisher="CN=21B875D6-F7A8-485D-8319-3615B5FABDEE"
     Version="0.1.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>MotionBloom TremorLab</DisplayName>
-    <PublisherDisplayName>MotionBloom</PublisherDisplayName>
+    <PublisherDisplayName>Quesify Net Inc.</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
     <Description>Real-time hand tremor detector. Local-only, no data leaves your device.</Description>
   </Properties>
