@@ -16,11 +16,11 @@ jobs:
       matrix:
         include:
           - os: macos-13
-            artifact: TremorLab-macos-x64
+            artifact: MotionBloom-macos-x64
           - os: macos-14
-            artifact: TremorLab-macos-arm64
+            artifact: MotionBloom-macos-arm64
           - os: windows-latest
-            artifact: TremorLab-windows-x64
+            artifact: MotionBloom-windows-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -37,16 +37,16 @@ jobs:
 
       - name: Build
         working-directory: packaging
-        run: pyinstaller --noconfirm tremorlab.spec
+        run: pyinstaller --noconfirm motionbloom.spec
 
       - name: Package (zip)
         shell: bash
         run: |
           cd packaging/dist
-          if [ -d "TremorLab.app" ]; then
-            zip -r "../../${{ matrix.artifact }}.zip" "TremorLab.app"
+          if [ -d "MotionBloom.app" ]; then
+            zip -r "../../${{ matrix.artifact }}.zip" "MotionBloom.app"
           else
-            7z a -tzip "../../${{ matrix.artifact }}.zip" "TremorLab" || zip -r "../../${{ matrix.artifact }}.zip" "TremorLab"
+            7z a -tzip "../../${{ matrix.artifact }}.zip" "MotionBloom" || zip -r "../../${{ matrix.artifact }}.zip" "MotionBloom"
           fi
 
       # --- macOS: codesign + notarize (optional, runs only if secrets present) ---
@@ -68,7 +68,7 @@ jobs:
           echo "$APPLE_CERT_P12_BASE64" | base64 --decode > cert.p12
           security import cert.p12 -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN"
-          APP="packaging/dist/TremorLab.app"
+          APP="packaging/dist/MotionBloom.app"
           codesign --deep --force --options runtime --timestamp \
             --entitlements packaging/entitlements.plist \
             --sign "$APPLE_SIGNING_IDENTITY" "$APP"
@@ -78,7 +78,7 @@ jobs:
             --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple "$APP"
           rm -f "${{ matrix.artifact }}.zip"
-          cd packaging/dist && zip -r "../../${{ matrix.artifact }}.zip" "TremorLab.app"
+          cd packaging/dist && zip -r "../../${{ matrix.artifact }}.zip" "MotionBloom.app"
 
       # --- Windows: build MSIX for Microsoft Store ---
       - name: Build MSIX
@@ -89,11 +89,11 @@ jobs:
                  Where-Object { Test-Path "$($_.FullName)\x64\makeappx.exe" } |
                  Select-Object -Last 1
           $makeappx = "$($sdk.FullName)\x64\makeappx.exe"
-          Copy-Item packaging/AppxManifest.xml packaging/dist/TremorLab/AppxManifest.xml
+          Copy-Item packaging/AppxManifest.xml packaging/dist/MotionBloom/AppxManifest.xml
           if (Test-Path packaging/Assets) {
-            Copy-Item -Recurse packaging/Assets packaging/dist/TremorLab/Assets
+            Copy-Item -Recurse packaging/Assets packaging/dist/MotionBloom/Assets
           }
-          & $makeappx pack /d packaging/dist/TremorLab /p "TremorLab-windows-x64.msix" /nv
+          & $makeappx pack /d packaging/dist/MotionBloom /p "MotionBloom-windows-x64.msix" /nv
 
       - uses: actions/upload-artifact@v4
         with:

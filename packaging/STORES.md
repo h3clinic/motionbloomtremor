@@ -5,7 +5,7 @@
 Path: direct MSIX upload — no rewrite required.
 
 1. **Register** as an individual dev at https://partner.microsoft.com/dashboard (one-time ~$19 USD).
-2. **Reserve app name** "MotionBloom TremorLab" in Partner Center → Apps and games → New product → MSIX or PWA.
+2. **Reserve app name** "MotionBloom MotionBloom" in Partner Center → Apps and games → New product → MSIX or PWA.
 3. **Update** [AppxManifest.xml](AppxManifest.xml):
    - Replace `Identity Name`, `Publisher`, and `Version` with the exact values shown on the reserved-app page (`Product Identity` section). Publisher **must** match `CN=<yourPublisherId>`.
 4. **Generate Store assets** (PNG, transparent):
@@ -14,7 +14,7 @@ Path: direct MSIX upload — no rewrite required.
    - `Assets/Square150x150Logo.png` — 150×150
    - `Assets/Wide310x150Logo.png` — 310×150
    Place under `packaging/Assets/` and commit.
-5. **Tag a release** (`git tag v0.1.x && git push origin v0.1.x`). The workflow builds `TremorLab-windows-x64.msix` and attaches it to the GitHub release.
+5. **Tag a release** (`git tag v0.1.x && git push origin v0.1.x`). The workflow builds `MotionBloom-windows-x64.msix` and attaches it to the GitHub release.
 6. **Upload** the `.msix` to Partner Center → Packages.
 7. **Store listing** — fill in description, screenshots (min 1, 1366×768 or 1920×1080), age rating, and paste the contents of [../PRIVACY.md](../PRIVACY.md) into the Privacy Policy URL field (or host it at `https://h3clinic.github.io/motionbloomtremor/PRIVACY`).
 8. **Submit** — automated cert + malware scan runs; typical approval ≈ 24–48 h.

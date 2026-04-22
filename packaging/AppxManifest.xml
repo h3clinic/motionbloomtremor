@@ -8,7 +8,7 @@
   <Identity
     Name="QuesifyNetInc.MotionBloom"
     Publisher="CN=21B875D6-F7A8-485D-8319-3615B5FABDEE"
-    Version="0.1.1.0"
+    Version="0.1.2.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
@@ -27,7 +27,7 @@
   </Resources>
 
   <Applications>
-    <Application Id="TremorLab" Executable="TremorLab.exe" EntryPoint="Windows.FullTrustApplication">
+    <Application Id="MotionBloom" Executable="MotionBloom.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="MotionBloom"
         Description="Real-time hand tremor detector"

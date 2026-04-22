@@ -1,6 +1,6 @@
-# PyInstaller spec for TremorLab.
-# Build: pyinstaller packaging/tremorlab.spec
-# Output: dist/TremorLab/   (one-dir, faster startup than one-file)
+# PyInstaller spec for MotionBloom.
+# Build: pyinstaller packaging/motionbloom.spec
+# Output: dist/MotionBloom/   (one-dir, faster startup than one-file)
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
@@ -16,7 +16,7 @@ hiddenimports += ["ffpyplayer", "ffpyplayer.player", "ffpyplayer.tools"]
 hiddenimports += ["PIL._tkinter_finder"]
 
 a = Analysis(
-    ["../tremorlab_run.py"],
+    ["../motionbloom_run.py"],
     pathex=["."],
     binaries=[],
     datas=datas,
@@ -35,13 +35,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="TremorLab",
+    name="MotionBloom",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=False,
-    icon="Assets/TremorLab.ico",
+    icon="Assets/MotionBloom.ico",
 )
 
 coll = COLLECT(
@@ -51,7 +51,7 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="TremorLab",
+    name="MotionBloom",
 )
 
 # macOS .app bundle
@@ -59,11 +59,11 @@ import sys
 if sys.platform == "darwin":
     app = BUNDLE(
         coll,
-        name="TremorLab.app",
-        icon="Assets/TremorLab.icns",
-        bundle_identifier="com.motionbloom.tremorlab",
+        name="MotionBloom.app",
+        icon="Assets/MotionBloom.icns",
+        bundle_identifier="com.motionbloom.motionbloom",
         info_plist={
-            "NSCameraUsageDescription": "TremorLab uses the camera to analyze hand tremor locally on your device.",
+            "NSCameraUsageDescription": "MotionBloom uses the camera to analyze hand tremor locally on your device.",
             "NSMicrophoneUsageDescription": "Audio is not recorded. Required for video playback.",
             "NSHighResolutionCapable": True,
             "CFBundleShortVersionString": "0.1.0",

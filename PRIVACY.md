@@ -1,8 +1,8 @@
-# Privacy Policy — MotionBloom TremorLab
+# Privacy Policy — MotionBloom MotionBloom
 
 _Last updated: April 21, 2026_
 
-MotionBloom TremorLab ("the app") is a desktop application that analyzes hand tremor using your device's webcam. This policy describes exactly what data the app touches and what it does with it.
+MotionBloom MotionBloom ("the app") is a desktop application that analyzes hand tremor using your device's webcam. This policy describes exactly what data the app touches and what it does with it.
 
 ## TL;DR
 **Nothing leaves your device.** No video, no images, no landmarks, no scores, no account data. The app has no server, no analytics, no telemetry, and no advertising SDKs.
@@ -29,7 +29,7 @@ The app is built on open-source libraries (MediaPipe, OpenCV, SciPy, Tkinter, FF
 The app is not directed to children under 13 and does not knowingly collect information from them.
 
 ## Medical disclaimer
-MotionBloom TremorLab is a **technical demo, not a medical device**. It is not intended to diagnose, treat, cure, or prevent any condition. Do not use it to make clinical decisions.
+MotionBloom MotionBloom is a **technical demo, not a medical device**. It is not intended to diagnose, treat, cure, or prevent any condition. Do not use it to make clinical decisions.
 
 ## Contact
 Questions: open an issue at https://github.com/h3clinic/motionbloomtremor/issues

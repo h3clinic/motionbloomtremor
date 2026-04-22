@@ -1,4 +1,4 @@
-# MotionBloom TremorLab
+# MotionBloom MotionBloom
 
 Real-time hand tremor detector. Webcam-only, runs 100% locally — no video leaves your machine.
 
@@ -20,7 +20,7 @@ Requires Python **3.10–3.12** (MediaPipe wheels).
 python3 -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python tremorlab_run.py
+python motionbloom_run.py
 ```
 
 macOS may prompt for camera permission on first launch. On macOS you also need Tk: `brew install python-tk@3.12`.
@@ -41,8 +41,8 @@ All processing is local. See [PRIVACY.md](PRIVACY.md).
 
 ```bash
 pip install pyinstaller
-pyinstaller packaging/tremorlab.spec
-# output in dist/TremorLab/
+pyinstaller packaging/motionbloom.spec
+# output in dist/MotionBloom/
 ```
 
 ## How it works
