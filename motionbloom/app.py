@@ -6,6 +6,7 @@ Red & white theme, card-based layout, conversational copy.
 from __future__ import annotations
 
 import csv
+import sys
 import time
 from collections import deque
 from dataclasses import asdict
@@ -891,24 +892,65 @@ class App:
         self.baseline_rms = rms
         self.status_var.set("Calibrated")
 
-    def start(self) -> None:
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
-        ok = False
-        for _ in range(30):
-            if cap.isOpened():
-                ok, _f = cap.read()
+    def _open_camera(self):
+        """Try several camera indices and backends. Return an opened
+        VideoCapture, or None if nothing worked."""
+        if sys.platform.startswith("win"):
+            backends = [cv2.CAP_MSMF, cv2.CAP_DSHOW, cv2.CAP_ANY]
+        elif sys.platform == "darwin":
+            backends = [cv2.CAP_AVFOUNDATION, cv2.CAP_ANY]
+        else:
+            backends = [cv2.CAP_V4L2, cv2.CAP_ANY]
+        for index in range(4):
+            for backend in backends:
+                try:
+                    cap = cv2.VideoCapture(index, backend)
+                except Exception:
+                    continue
+                if not cap or not cap.isOpened():
+                    if cap is not None:
+                        cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, CAM_WIDTH)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_HEIGHT)
+                ok = False
+                for _ in range(30):
+                    ok, _f = cap.read()
+                    if ok:
+                        break
+                    time.sleep(0.1)
                 if ok:
-                    break
-            time.sleep(0.1)
-        if not ok:
-            cap.release()
-            messagebox.showerror(
-                "Camera unavailable",
-                "We couldn't access your webcam.\n\nOn macOS, grant camera "
-                "permission in System Settings → Privacy & Security → "
-                "Camera for the app running Python, then try again.")
+                    return cap
+                cap.release()
+        return None
+
+    def start(self) -> None:
+        cap = self._open_camera()
+        if cap is None:
+            if sys.platform.startswith("win"):
+                guidance = (
+                    "We couldn't access your webcam.\n\n"
+                    "On Windows, open Settings → Privacy & security → "
+                    "Camera and make sure camera access is turned on for "
+                    "this app (and for desktop apps). Also close any other "
+                    "app that may be using the camera (Teams, Zoom, "
+                    "Camera app), then try again."
+                )
+            elif sys.platform == "darwin":
+                guidance = (
+                    "We couldn't access your webcam.\n\n"
+                    "On macOS, grant camera permission in System Settings "
+                    "→ Privacy & Security → Camera for MotionBloom (or the "
+                    "app running Python), then try again."
+                )
+            else:
+                guidance = (
+                    "We couldn't access your webcam. Please check that a "
+                    "camera is connected, that no other app is using it, "
+                    "and that this app has permission to use it, then try "
+                    "again."
+                )
+            messagebox.showerror("Camera unavailable", guidance)
             return
         self.tracker.set_landmark(LANDMARK_CHOICES[self.lm_var.get()])
         self.tracker.start(cap)
@@ -966,11 +1008,17 @@ class App:
         try:
             frame = self.tracker.get_frame()
             if frame is not None:
-                idx = self.nb.index("current") if self.nb.tabs() else 0
-                if idx == 0:
-                    self._render_video(self.video_label, frame)
-                elif idx == 1:
-                    self._render_video(self.ex_video_label, frame)
+                try:
+                    idx = self.nb.index("current") if self.nb.tabs() else 0
+                except Exception:
+                    idx = 0
+                try:
+                    if idx == 0:
+                        self._render_video(self.video_label, frame)
+                    elif idx == 1:
+                        self._render_video(self.ex_video_label, frame)
+                except Exception:
+                    pass
                 if self.tracker.fps_meas > 0:
                     self.fps_var.set(f"{self.tracker.fps_meas:.0f} fps")
         finally:
@@ -981,6 +1029,8 @@ class App:
         lbl_h = max(label.winfo_height(), 240)
         h, w = frame.shape[:2]
         scale = min(lbl_w / w, lbl_h / h)
+        if not np.isfinite(scale) or scale <= 0:
+            scale = 1.0
         new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
         img = Image.fromarray(frame).resize((new_w, new_h), Image.BILINEAR)
         photo = ImageTk.PhotoImage(image=img)

@@ -152,36 +152,50 @@ class TremorTracker:
         last_t = time.time()
         frame_idx = 0
 
-        hands = mp_hands.Hands(
-            max_num_hands=1,
-            model_complexity=0,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
-        pose = mp_pose.Pose(
-            model_complexity=0,
-            enable_segmentation=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+        hands = None
+        pose = None
+        try:
+            hands = mp_hands.Hands(
+                max_num_hands=1,
+                model_complexity=0,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+        except Exception:
+            hands = None
+        try:
+            pose = mp_pose.Pose(
+                model_complexity=0,
+                enable_segmentation=False,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
+            )
+        except Exception:
+            pose = None
         try:
             while not self.stop_event.is_set():
-                ok, frame = cap.read()
-                if not ok:
+                try:
+                    ok, frame = cap.read()
+                except Exception:
+                    ok, frame = False, None
+                if not ok or frame is None:
                     time.sleep(0.01)
                     continue
-                frame = cv2.flip(frame, 1)
+                try:
+                    frame = cv2.flip(frame, 1)
+                except Exception:
+                    pass
                 h, w = frame.shape[:2]
                 self.frame_shape = (h, w)
 
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                rgb.flags.writeable = False
-
-                hresults = hands.process(rgb)
-
-                if frame_idx % POSE_EVERY == 0:
-                    presults = pose.process(rgb)
-                    self._update_pose(presults)
+                # Publish the raw frame immediately so the user always
+                # sees the camera feed, even if MediaPipe fails later.
+                try:
+                    raw_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    with self._frame_lock:
+                        self._latest_frame = raw_rgb
+                except Exception:
+                    pass
 
                 now = time.time()
                 dt = now - last_t
@@ -191,7 +205,25 @@ class TremorTracker:
                     ema_fps = inst if ema_fps == 0 else 0.9 * ema_fps + 0.1 * inst
                     self.fps_meas = ema_fps
 
-                if hresults.multi_hand_landmarks:
+                hresults = None
+                if hands is not None:
+                    try:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        rgb.flags.writeable = False
+                        hresults = hands.process(rgb)
+                    except Exception:
+                        hresults = None
+
+                if pose is not None and frame_idx % POSE_EVERY == 0:
+                    try:
+                        rgb2 = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        rgb2.flags.writeable = False
+                        presults = pose.process(rgb2)
+                        self._update_pose(presults)
+                    except Exception:
+                        pass
+
+                if hresults is not None and hresults.multi_hand_landmarks:
                     self.hand_present = True
                     lm = hresults.multi_hand_landmarks[0].landmark
                     pts = np.array([[p.x * w, p.y * h] for p in lm],
@@ -235,15 +267,24 @@ class TremorTracker:
                 while self.samples and now - self.samples[0][0] > BUFFER_SECONDS:
                     self.samples.popleft()
 
-                out = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                with self._frame_lock:
-                    self._latest_frame = out
+                # Publish the annotated frame (overlays) for display.
+                try:
+                    out = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    with self._frame_lock:
+                        self._latest_frame = out
+                except Exception:
+                    pass
 
                 frame_idx += 1
+        except Exception:
+            # Never let the capture thread die without releasing.
+            pass
         finally:
             try:
-                hands.close()
-                pose.close()
+                if hands is not None:
+                    hands.close()
+                if pose is not None:
+                    pose.close()
             except Exception:
                 pass
 
