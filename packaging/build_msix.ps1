@@ -1,5 +1,5 @@
 <#
-    build_msix.ps1 — Build a MotionBloom MSIX on Windows.
+    build_msix.ps1 - Build a MotionBloom MSIX on Windows.
 
     Prereqs (install once):
       - Python 3.11 x64       (winget install Python.Python.3.11)
@@ -66,7 +66,7 @@ $requiredAssets = @(
 )
 foreach ($a in $requiredAssets) {
     if (-not (Test-Path (Join-Path $assetsDst $a))) {
-        Write-Warning "Missing asset: $a — MakeAppx will fail. Place it in $assetsSrc."
+        Write-Warning "Missing asset: $a - MakeAppx will fail. Place it in $assetsSrc."
     }
 }
 
