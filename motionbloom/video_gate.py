@@ -1,4 +1,4 @@
-"""Video gate — plays a video and pauses for tremor-check challenges.
+"""Video gate - plays a video and pauses for tremor-check challenges.
 
 The gate runs on the same tracker/exercise machinery as the Exercises tab.
 Every `interval` seconds of playback, the video pauses and prompts the user
@@ -112,7 +112,7 @@ class VideoGate(Frame):
         Label(hero, text="Focus mode",
               font=("Helvetica", 18, "bold"),
               fg=TEXT, bg=BG).pack(anchor="w")
-        Label(hero, text="Watch a video — we'll pause every so often for a "
+        Label(hero, text="Watch a video. We'll pause every so often for a "
                          "quick tremor check. Pass the check to keep "
                          "watching. The difficulty adapts to you.",
               fg=MUTED, bg=BG, font=("Helvetica", 11),
@@ -128,7 +128,7 @@ class VideoGate(Frame):
                                  font=("Helvetica", 12))
         self.video_label.pack(fill="both", expand=True)
 
-        # Controls below video — seek bar + player controls + gate setting
+        # Controls below video - seek bar + player controls + gate setting
         ctrl_wrap = Frame(self, bg=BG)
         ctrl_wrap.grid(row=2, column=0, sticky="ew", padx=(0, 12),
                        pady=(4, 10))
@@ -220,7 +220,7 @@ class VideoGate(Frame):
         side.columnconfigure(0, weight=1)
         side.rowconfigure(4, weight=1)
 
-        # Camera mirror — shows the user what the tracker sees
+        # Camera mirror - shows the user what the tracker sees
         cam_card = self._make_card(side, padding=8)
         cam_card.grid(row=0, column=0, sticky="ew")
         cam_card.inner.configure(bg="#000000")
@@ -239,7 +239,7 @@ class VideoGate(Frame):
         si = status_card.inner
         si.columnconfigure(0, weight=1)
         self._section(si, "Next gate in").grid(row=0, column=0, sticky="w")
-        self.next_gate_var = StringVar(value="— s")
+        self.next_gate_var = StringVar(value="- s")
         Label(si, textvariable=self.next_gate_var,
               font=("Helvetica", 26, "bold"),
               fg=TEXT, bg=SURFACE).grid(row=1, column=0, sticky="w",
@@ -256,7 +256,7 @@ class VideoGate(Frame):
         ti.columnconfigure(0, weight=1)
         self._section(ti, "Adaptive threshold").grid(row=0, column=0,
                                                      sticky="w")
-        self.thr_var = StringVar(value="— /100")
+        self.thr_var = StringVar(value="- /100")
         Label(ti, textvariable=self.thr_var,
               font=("Helvetica", 22, "bold"),
               fg=RED, bg=SURFACE).grid(row=1, column=0, sticky="w",
@@ -274,7 +274,7 @@ class VideoGate(Frame):
         ci.columnconfigure(0, weight=1)
         self._section(ci, "Challenge").grid(row=0, column=0, sticky="w")
 
-        self.chal_name_var = StringVar(value="—")
+        self.chal_name_var = StringVar(value="-")
         Label(ci, textvariable=self.chal_name_var,
               font=("Helvetica", 15, "bold"),
               fg=TEXT, bg=SURFACE).grid(row=1, column=0, sticky="w",
@@ -295,7 +295,7 @@ class VideoGate(Frame):
                                     font=("Helvetica", 11, "bold"))
         self.chal_stage_lbl.grid(row=3, column=0, sticky="ew", pady=(10, 0))
 
-        # Pose-correctness chip — turns green when user is in the required pose
+        # Pose-correctness chip - turns green when user is in the required pose
         self.pose_chip_var = StringVar(value="Pose: waiting")
         self.pose_chip = Label(ci, textvariable=self.pose_chip_var,
                                bg=SURFACE_ALT, fg=MUTED,
@@ -486,7 +486,7 @@ class VideoGate(Frame):
                     else:
                         next_delay = 5
                 else:
-                    # No frame ready yet — poll again soon but not in a
+                    # No frame ready yet - poll again soon but not in a
                     # tight loop.
                     next_delay = 10
         finally:
@@ -588,7 +588,7 @@ class VideoGate(Frame):
                     hint = (f"Avg {avg:.0f} + margin. Stay at or below "
                             "this to pass the gate.")
                 if self.fail_streak >= 1:
-                    hint = ("Relaxed after a miss — keep going, this "
+                    hint = ("Relaxed after a miss. Keep going, this "
                             "check will be easier.")
                 self.thr_hint_var.set(hint)
 
@@ -646,7 +646,7 @@ class VideoGate(Frame):
         grip = self.app.tracker.get_grip_strength()
         v = sess.update(pose, tip, score, peak, amp, grip=grip)
 
-        # Live pose-correctness chip — must be green to pass
+        # Live pose-correctness chip - must be green to pass
         if v.ok:
             self.pose_chip_var.set("Pose: correct ✓")
             self.pose_chip.configure(bg="#ecfdf3", fg="#0f5132")
@@ -675,7 +675,7 @@ class VideoGate(Frame):
             self.chal_stage_lbl.configure(bg=RED_TINT, fg=RED_DEEP)
             self.chal_feedback_var.set(
                 v.message if v.ok else
-                f"Stay in position — {v.message.lower()}")
+                f"Stay in position. {v.message.lower()}")
             self.chal_progress["value"] = frac * 100
         elif sess.stage == Stage.DONE:
             self._finish_challenge()
@@ -691,10 +691,10 @@ class VideoGate(Frame):
         if passed:
             self.pass_streak += 1
             self.fail_streak = max(0, self.fail_streak - 1)
-            self.chal_stage_var.set("Passed — enjoy the video")
+            self.chal_stage_var.set("Passed. Enjoy the video")
             self.chal_stage_lbl.configure(bg="#ecfdf3", fg="#0f5132")
             self.chal_result_var.set(
-                f"Mean tremor score {mean_s:.0f}/100 — under your "
+                f"Mean tremor score {mean_s:.0f}/100. Under your "
                 f"threshold of {self.personal_threshold:.0f}. Resuming "
                 "playback.")
             self.chal_result_lbl.configure(fg=OK_GREEN)
@@ -714,7 +714,7 @@ class VideoGate(Frame):
         else:
             self.fail_streak += 1
             self.pass_streak = 0
-            self.chal_stage_var.set("Not yet — let's try again")
+            self.chal_stage_var.set("Not yet. Let's try again")
             self.chal_stage_lbl.configure(bg=RED_TINT, fg=RED_DEEP)
             reason = ("pose wasn't held long enough" if not samples
                       else f"mean score {mean_s:.0f} exceeded your "

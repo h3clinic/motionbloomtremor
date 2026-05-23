@@ -1,1 +1,1 @@
-"""MotionBloom — desktop application entry point."""
+"""MotionBloom - desktop application entry point."""

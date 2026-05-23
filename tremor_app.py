@@ -1,8 +1,13 @@
-"""Real-Time Tremor Detector — desktop app.
+"""Real-Time Tremor Detector — LEGACY STANDALONE APP.
 
-Tracks a hand landmark via webcam (MediaPipe Hands), estimates dominant
-oscillation frequency (1–15 Hz) using a Goertzel scan on a rolling 3-second
-window, and shows live metrics plus a motion spectrum in a Tkinter window.
+⚠️ WARNING: This is the simplified standalone version.
+It does NOT include Phase 2B improvements:
+- No multi-fingertip averaging
+- No trial quality assessment
+- No task mode support
+
+For the full app with SOTA methods, run:
+    python -m motionbloom
 
 Disclaimer: technical demo, not a medical device.
 """

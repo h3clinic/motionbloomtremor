@@ -77,7 +77,7 @@ def verify_touch_nose(pose: PoseSnapshot | None,
     norm = d / scale
     # Within 25% of inter-shoulder distance ≈ touching / near nose
     if norm < 0.18:
-        return Verification(True, "Holding at nose — keep still", 1.0)
+        return Verification(True, "Holding at nose. Keep still", 1.0)
     if norm < 0.35:
         return Verification(False, "Move fingertip closer to your nose",
                             1.0 - (norm - 0.18) / 0.17)
@@ -107,7 +107,7 @@ def verify_scratch_head(pose: PoseSnapshot | None,
 
     if above and lateral < 1.2 and norm < 1.6:
         q = 1.0 - min(1.0, max(0.0, (norm - 0.4) / 1.2))
-        return Verification(True, "On top of head — hold steady", q)
+        return Verification(True, "On top of head. Hold steady", q)
     if above and lateral < 1.8:
         return Verification(False, "Move hand closer to the top of your head",
                             0.5)
@@ -139,12 +139,12 @@ def verify_hold_object(pose: PoseSnapshot | None,
     sh_width = _dist(l_sh, r_sh)
     extended = _dist(wrist, shoulder_mid) / max(0.05, sh_width) > 0.9
 
-    # Grip/object check — fingers should be curled as if gripping.
+    # Grip/object check - fingers should be curled as if gripping.
     gripping = grip is None or grip >= 0.45
 
     if y_ok and extended and gripping:
         return Verification(True,
-                            "Arm outstretched, gripping object — hold steady",
+                            "Arm outstretched, gripping object. Hold steady",
                             1.0)
     if y_ok and extended and not gripping:
         return Verification(False,

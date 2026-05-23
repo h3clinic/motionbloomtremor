@@ -48,11 +48,13 @@ if (-not (Test-Path "$appDir\MotionBloom.exe")) {
 Write-Host "Staging MSIX layout..."
 Copy-Item "packaging\AppxManifest.xml" "$appDir\AppxManifest.xml" -Force
 
-$assetsSrc = "packaging\Assets\store"
+$assetsSrc = "packaging\Assets"
 $assetsDst = "$appDir\Assets"
 New-Item -ItemType Directory -Force -Path $assetsDst | Out-Null
 if (Test-Path $assetsSrc) {
-    Copy-Item "$assetsSrc\*" $assetsDst -Recurse -Force
+    # Copy the tile/logo PNGs at the top of packaging\Assets (not the store\ subfolder,
+    # which contains Partner Center listing images, not MSIX tile assets).
+    Get-ChildItem $assetsSrc -File -Filter *.png | Copy-Item -Destination $assetsDst -Force
 }
 
 # Sanity check: manifest references these logo files.
