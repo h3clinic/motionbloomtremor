@@ -368,6 +368,103 @@ def generate_balanced_configs(count: int, seed: int, fps: int, duration: float) 
     return configs[:count]
 
 
+# Detector-friendly subsets for smoke mode
+SMOKE_CAMERAS = [
+    {"name": "front_high",   "azim": 0,   "elev": 20},
+    {"name": "front_above",  "azim": 0,   "elev": 30},
+    {"name": "oblique_l",    "azim": 20,  "elev": 20},
+    {"name": "oblique_r",    "azim": -20, "elev": 20},
+    {"name": "oblique_high", "azim": 15,  "elev": 28},
+]
+
+SMOKE_POSES = ["rest_open", "relaxed", "finger_spread", "pinch", "palm_down", "grip_release"]
+
+SMOKE_SKIN_TONES = ["light", "light_warm", "medium_light", "medium", "medium_warm", "tan"]
+
+
+def generate_smoke_configs(count: int, seed: int, fps: int, duration: float) -> List[Dict]:
+    """Generate detector-friendly configs for smoke validation.
+
+    Restricts to:
+    - Frontal/oblique cameras only (no side, top, closeup)
+    - Open/relaxed/pointing/pinch poses (no fist, no edge-on)
+    - Light-to-medium skin tones (no very dark in early testing)
+    - Stationary motion only (no confounding movement)
+    """
+    rng = random.Random(seed)
+
+    # Use a simpler severity distribution for smoke
+    severity_to_profiles = {
+        "none": ["no_tremor"],
+        "mild": ["mild_postural", "finger_dominant"],
+        "moderate": ["moderate_postural", "wrist_dominant"],
+        "severe": ["severe_postural"],
+    }
+
+    configs = []
+    for i in range(count):
+        # Cycle through severity classes evenly
+        severity_class = list(severity_to_profiles.keys())[i % len(severity_to_profiles)]
+        profiles = severity_to_profiles[severity_class]
+        tremor_profile_name = rng.choice(profiles)
+        profile = TREMOR_PROFILES[tremor_profile_name]
+
+        if profile["freq_range"][1] == 0:
+            freq, amp = 0.0, 0.0
+        else:
+            freq = rng.uniform(*profile["freq_range"])
+            amp = rng.uniform(*profile["amp_range"])
+
+        # Affected joints
+        if tremor_profile_name == "wrist_dominant":
+            affected_type = "wrist_only"
+        elif tremor_profile_name == "finger_dominant":
+            affected_type = "multiple_fingers"
+        else:
+            affected_type = rng.choice(["wrist_only", "multiple_fingers", "wrist_plus_fingers"])
+
+        severity_score = compute_severity_score(amp, freq, affected_type)
+
+        # Detector-friendly camera
+        camera = rng.choice(SMOKE_CAMERAS)
+
+        # Detector-friendly pose
+        pose_family = rng.choice(SMOKE_POSES)
+        base_pose = POSE_FAMILIES[pose_family]
+        pose_rotations = {}
+        for bone, (rx, ry, rz) in base_pose.items():
+            pose_rotations[bone] = (
+                round(rx + rng.gauss(0, 2), 2),
+                round(ry + rng.gauss(0, 0.5), 2),
+                round(rz + rng.gauss(0, 1.5), 2),
+            )
+
+        # Detector-friendly skin tone
+        skin_tone = rng.choice(SMOKE_SKIN_TONES)
+
+        render_seed = rng.randint(0, 2**31)
+
+        configs.append({
+            "pose_family": pose_family,
+            "pose_rotations": pose_rotations,
+            "skin_tone_id": skin_tone,
+            "tremor_profile": tremor_profile_name,
+            "tremor_type": profile["label"],
+            "frequency_hz": round(freq, 2),
+            "amplitude_degrees": round(amp, 2),
+            "affected_joint_type": affected_type,
+            "affected_joints": AFFECTED_JOINT_SETS[affected_type],
+            "severity_score": severity_score,
+            "camera": camera,
+            "motion_type": "stationary",
+            "duration": duration,
+            "fps": fps,
+            "render_seed": render_seed,
+        })
+
+    return configs
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BLENDER RENDER SCRIPT (embedded)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -447,47 +544,59 @@ bbox = [mesh_obj.matrix_world @ Vector(v) for v in mesh_obj.bound_box]
 bbox_center = sum(bbox, Vector()) / 8
 bbox_size = max((max(v[i] for v in bbox) - min(v[i] for v in bbox)) for i in range(3))
 cx, cy, cz = bbox_center.x, bbox_center.y, bbox_center.z
-light_dist = bbox_size * 1.5
-cam_distance = bbox_size * 1.5
+light_dist = bbox_size * 2.0
+# Camera distance: hand should occupy ~50-60% of frame
+# With 35mm lens at 512px, 2.2x bbox_size gives ~50% framing
+cam_distance = bbox_size * 2.2
 
-# ─── Lighting (3-point Sun + Point) ──────────────────────────────────────────
-sun_light = bpy.data.lights.new(name="SunKey", type='SUN')
-sun_light.energy = 12.0
-sun_light.angle = math.radians(15)
-sun_light.color = (1.0, 0.97, 0.93)
-sun_obj = bpy.data.objects.new("SunKey", sun_light)
-bpy.context.collection.objects.link(sun_obj)
-sun_obj.rotation_euler = Euler((math.radians(-50), math.radians(15), math.radians(25)))
+# ─── Lighting (soft studio setup for MediaPipe compatibility) ─────────────────
+# Key light: large soft area light from front-above
+key_light = bpy.data.lights.new(name="KeyArea", type='AREA')
+key_light.energy = 800
+key_light.size = bbox_size * 3.0  # Very large for soft shadows
+key_light.color = (1.0, 0.97, 0.93)
+key_obj = bpy.data.objects.new("KeyArea", key_light)
+bpy.context.collection.objects.link(key_obj)
+key_obj.location = (cx, cy - light_dist * 1.2, cz + light_dist * 1.0)
+key_obj.rotation_euler = Euler((math.radians(-40), 0, 0))
 
-sun_fill = bpy.data.lights.new(name="SunFill", type='SUN')
-sun_fill.energy = 6.0
-sun_fill.angle = math.radians(30)
-sun_fill.color = (0.90, 0.93, 1.0)
-sun_fill_obj = bpy.data.objects.new("SunFill", sun_fill)
-bpy.context.collection.objects.link(sun_fill_obj)
-sun_fill_obj.rotation_euler = Euler((math.radians(-30), math.radians(-20), math.radians(-15)))
+# Fill light: area light from opposite side (reduces shadows)
+fill_light = bpy.data.lights.new(name="FillArea", type='AREA')
+fill_light.energy = 500
+fill_light.size = bbox_size * 4.0  # Even larger for very soft fill
+fill_light.color = (0.95, 0.97, 1.0)
+fill_obj = bpy.data.objects.new("FillArea", fill_light)
+bpy.context.collection.objects.link(fill_obj)
+fill_obj.location = (cx + light_dist * 0.8, cy - light_dist * 0.5, cz + light_dist * 0.3)
+fill_obj.rotation_euler = Euler((math.radians(-25), math.radians(35), 0))
 
-sun_under = bpy.data.lights.new(name="SunUnder", type='SUN')
-sun_under.energy = 3.0
-sun_under.angle = math.radians(45)
-sun_under_obj = bpy.data.objects.new("SunUnder", sun_under)
-bpy.context.collection.objects.link(sun_under_obj)
-sun_under_obj.rotation_euler = Euler((math.radians(60), 0, math.radians(-10)))
+# Rim/back light: subtle edge definition
+rim_light = bpy.data.lights.new(name="RimArea", type='AREA')
+rim_light.energy = 300
+rim_light.size = bbox_size * 2.0
+rim_light.color = (1.0, 0.98, 0.95)
+rim_obj = bpy.data.objects.new("RimArea", rim_light)
+bpy.context.collection.objects.link(rim_obj)
+rim_obj.location = (cx - light_dist * 0.5, cy + light_dist * 0.8, cz + light_dist * 0.6)
+rim_obj.rotation_euler = Euler((math.radians(-20), math.radians(-150), 0))
 
-point_light = bpy.data.lights.new(name="PointWarm", type='POINT')
-point_light.energy = 8000
-point_light.color = (1.0, 0.95, 0.90)
-point_light.shadow_soft_size = 3.0
-point_obj = bpy.data.objects.new("PointWarm", point_light)
-bpy.context.collection.objects.link(point_obj)
-point_obj.location = (cx, cy - light_dist * 0.6, cz + light_dist * 0.4)
+# Under-fill: prevents completely dark underside
+under_light = bpy.data.lights.new(name="UnderFill", type='AREA')
+under_light.energy = 200
+under_light.size = bbox_size * 3.0
+under_light.color = (0.9, 0.92, 1.0)
+under_obj = bpy.data.objects.new("UnderFill", under_light)
+bpy.context.collection.objects.link(under_obj)
+under_obj.location = (cx, cy - light_dist * 0.3, cz - light_dist * 0.8)
+under_obj.rotation_euler = Euler((math.radians(70), 0, 0))
 
-# World background
+# World background: medium gray for contrast (not black, not white)
 world = bpy.data.worlds.new("World")
 bpy.context.scene.world = world
 world.use_nodes = True
 bg_node = world.node_tree.nodes["Background"]
-bg_node.inputs["Color"].default_value = (0.18, 0.18, 0.20, 1.0)
+# Neutral gray background - enough contrast with skin, not confusing for detector
+bg_node.inputs["Color"].default_value = (0.42, 0.44, 0.46, 1.0)
 bg_node.inputs["Strength"].default_value = 1.0
 
 # ─── Render Settings ─────────────────────────────────────────────────────────
@@ -500,10 +609,10 @@ scene.render.image_settings.file_format = 'PNG'
 scene.render.image_settings.color_mode = 'RGB'
 scene.eevee.use_shadows = True
 
-# Camera
+# Camera: 35mm lens for wider FOV - hand occupies ~55% of frame
 cam_data = bpy.data.cameras.new(name="Camera")
 cam_data.type = 'PERSP'
-cam_data.lens = 50
+cam_data.lens = 35
 cam_obj = bpy.data.objects.new("Camera", cam_data)
 bpy.context.collection.objects.link(cam_obj)
 scene.camera = cam_obj
@@ -534,11 +643,31 @@ def set_skin_material(tone_data):
     nodes.clear()
     output_node = nodes.new(type='ShaderNodeOutputMaterial')
     bsdf = nodes.new(type='ShaderNodeBsdfPrincipled')
-    bsdf.inputs["Base Color"].default_value = tone_data["base"]
+    
+    # Add subtle noise to base color for skin-like variation
+    noise_tex = nodes.new(type='ShaderNodeTexNoise')
+    noise_tex.inputs['Scale'].default_value = 15.0
+    noise_tex.inputs['Detail'].default_value = 4.0
+    noise_tex.inputs['Roughness'].default_value = 0.6
+    
+    # Mix noise with base color for subtle variation
+    mix_rgb = nodes.new(type='ShaderNodeMix')
+    mix_rgb.data_type = 'RGBA'
+    mix_rgb.inputs[0].default_value = 0.08  # Very subtle variation
+    mix_rgb.inputs[6].default_value = tone_data["base"]
+    # Slightly darker variation
+    darker = tuple(max(0, c - 0.06) for c in tone_data["base"][:3]) + (1.0,)
+    mix_rgb.inputs[7].default_value = darker
+    links.new(noise_tex.outputs['Fac'], mix_rgb.inputs[0])
+    links.new(mix_rgb.outputs[2], bsdf.inputs["Base Color"])
+    
     bsdf.inputs["Roughness"].default_value = tone_data["roughness"]
-    bsdf.inputs["Specular IOR Level"].default_value = 0.35
-    bsdf.inputs["Subsurface Weight"].default_value = 0.2
+    bsdf.inputs["Specular IOR Level"].default_value = 0.3
+    # Stronger subsurface for realistic skin translucency
+    bsdf.inputs["Subsurface Weight"].default_value = 0.35
     bsdf.inputs["Subsurface Radius"].default_value = tone_data["subsurface"]
+    bsdf.inputs["Subsurface Scale"].default_value = 0.1
+    
     links.new(bsdf.outputs["BSDF"], output_node.inputs["Surface"])
     mesh_obj.data.materials.append(mat)
 
@@ -742,6 +871,7 @@ def main():
     parser.add_argument("--duration", type=float, default=4.0, help="Video duration (seconds)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries for failed renders")
+    parser.add_argument("--smoke", action="store_true", help="Smoke mode: restrict to detector-friendly settings only")
     args = parser.parse_args()
 
     asset = Path(args.asset).resolve()
@@ -768,8 +898,12 @@ def main():
     print()
 
     # Generate balanced configs
-    print("Generating balanced sample configurations...")
-    configs = generate_balanced_configs(args.count, args.seed, args.fps, args.duration)
+    if args.smoke:
+        print("Generating SMOKE MODE configs (detector-friendly only)...")
+        configs = generate_smoke_configs(args.count, args.seed, args.fps, args.duration)
+    else:
+        print("Generating balanced sample configurations...")
+        configs = generate_balanced_configs(args.count, args.seed, args.fps, args.duration)
 
     # Print distribution summary
     from collections import Counter
