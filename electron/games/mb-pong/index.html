@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Pong · Precision Rally</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000011;overflow:hidden}
+canvas{display:block}
+#msg{position:fixed;inset:0;background:rgba(0,0,16,.9);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 38px/1 system-ui;color:#3b82f6;margin-bottom:10px}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+.k{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 7px;font:700 12px monospace}
+button{margin-top:18px;background:#3b82f6;color:#fff;border:none;padding:11px 30px;border-radius:11px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:12px;font:700 16px system-ui;color:#facc15;min-height:22px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h1>🏓 MB Pong</h1>
+  <p class="sub">Precision Rally · tremor wobbles <em>both</em> paddles!</p>
+  <p class="sub" style="margin-top:8px">
+    <span class="k">W / S</span>&nbsp; or &nbsp;<span class="k">↑ / ↓</span>&nbsp; · First to 7 wins
+  </p>
+  <button id="startBtn">Play</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+let W,H;
+function resize(){ W=cv.width=window.innerWidth|0; H=cv.height=window.innerHeight|0; }
+resize(); window.addEventListener('resize',resize);
+
+const PW=13,PH=88,BALL=9,WIN=7;
+let py,ay,bx,by,bvx,bvy,ps,as_,running;
+let ts=0,tf=5,pw=0,aw=0;
+
+function poll(){
+  if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore;
+  if(typeof window._mbTremorFreq==='number')  tf=Math.max(1,window._mbTremorFreq);
+}
+
+const keys={};
+document.addEventListener('keydown',e=>{keys[e.code]=true;e.preventDefault();});
+document.addEventListener('keyup',  e=>{keys[e.code]=false;});
+
+function resetBall(dir){
+  bx=W/2; by=H/2;
+  const a=(Math.random()-.5)*.5;
+  bvx=dir*5; bvy=Math.sin(a)*4;
+}
+
+function startGame(){
+  py=H/2-PH/2; ay=H/2-PH/2;
+  ps=0; as_=0; running=true;
+  resetBall(Math.random()<.5?1:-1);
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  requestAnimationFrame(frame);
+}
+
+function frame(){
+  if(!running) return;
+  poll();
+  // Player paddle movement
+  if(keys['KeyW']||keys['ArrowUp'])   py=Math.max(0,py-6);
+  if(keys['KeyS']||keys['ArrowDown']) py=Math.min(H-PH,py+6);
+  pw+=tf*.035; const pj=Math.sin(pw)*(ts/100)*16;
+  const pcy=Math.max(0,Math.min(H-PH,py+pj));
+
+  // AI tracks ball with error proportional to tremor
+  const aiErr=(Math.random()-.5)*(ts/100)*28;
+  const aiTarget=by-PH/2+aiErr;
+  if(ay+PH/2<aiTarget) ay=Math.min(ay+4.6,aiTarget);
+  else                  ay=Math.max(ay-4.6,aiTarget);
+  aw+=tf*.045; const aj=Math.sin(aw)*(ts/100)*22;
+  const acy=Math.max(0,Math.min(H-PH,ay+aj));
+
+  // Ball physics
+  bx+=bvx; by+=bvy;
+  if(by-BALL<0)  {by=BALL;  bvy=Math.abs(bvy);}
+  if(by+BALL>H)  {by=H-BALL;bvy=-Math.abs(bvy);}
+
+  const LX=50+PW, RX=W-50-PW;
+  if(bvx<0&&bx-BALL<LX&&bx-BALL>LX-10&&by>pcy-4&&by<pcy+PH+4){
+    bvx=Math.abs(bvx)*1.05; bvy+=((by-(pcy+PH/2))/(PH/2))*3; bx=LX+BALL;
+  }
+  if(bvx>0&&bx+BALL>RX&&bx+BALL<RX+10&&by>acy-4&&by<acy+PH+4){
+    bvx=-Math.abs(bvx)*1.05; bvy+=((by-(acy+PH/2))/(PH/2))*3; bx=RX-BALL;
+  }
+  const spd=Math.hypot(bvx,bvy);
+  if(spd>20){bvx=bvx/spd*20;bvy=bvy/spd*20;}
+
+  if(bx+BALL<0){ as_++; if(as_>=WIN) return endGame(); resetBall(1); }
+  if(bx-BALL>W){ ps++;  if(ps>=WIN) return endGame(); resetBall(-1); }
+
+  // Render
+  ctx.fillStyle='#000011'; ctx.fillRect(0,0,W,H);
+  ctx.setLineDash([8,8]); ctx.strokeStyle='rgba(255,255,255,.14)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(W/2,0); ctx.lineTo(W/2,H); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font='bold 52px system-ui'; ctx.fillStyle='rgba(255,255,255,.17)'; ctx.textAlign='center';
+  ctx.fillText(ps,W/2-90,70); ctx.fillText(as_,W/2+90,70);
+  ctx.font='11px system-ui'; ctx.fillStyle='rgba(255,255,255,.28)';
+  ctx.fillText('Tremor: '+Math.round(ts)+'%',W/2,H-12);
+  // Player paddle (blue)
+  ctx.fillStyle='#3b82f6';
+  ctx.beginPath(); ctx.roundRect(50,pcy,PW,PH,5); ctx.fill();
+  // AI paddle (red)
+  ctx.fillStyle='#ef4444';
+  ctx.beginPath(); ctx.roundRect(W-50-PW,acy,PW,PH,5); ctx.fill();
+  // Ball
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(bx,by,BALL,0,Math.PI*2); ctx.fill();
+
+  requestAnimationFrame(frame);
+}
+
+function endGame(){
+  running=false;
+  document.getElementById('msg').classList.remove('gone');
+  document.getElementById('result').textContent=
+    ps>=WIN?'🎉 You win! '+ps+' – '+as_:'🤖 AI wins '+as_+' – '+ps;
+  document.getElementById('startBtn').textContent='Play Again';
+}
+
+document.getElementById('startBtn').addEventListener('click',startGame);
+ctx.fillStyle='#000011'; ctx.fillRect(0,0,800,600);
+</script>
+</body>
+</html>

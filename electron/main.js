@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -7,6 +7,10 @@ let mainWindow = null;
 let bridgeProcess = null;
 let stdoutBuffer = "";
 let frameCount = 0;
+
+// Game launcher windows: each gets a live tremor HUD injected via preload.
+const gameWindows = new Map();
+let gameWinIdCounter = 0;
 
 const repoRoot = path.resolve(__dirname, "..");
 // TopoTremor backend location. Prefer the copy vendored INSIDE the repo so a
@@ -46,6 +50,12 @@ function sendToRenderer(channel, payload) {
   }
 }
 
+function sendToGameWindows(event) {
+  for (const [, win] of gameWindows) {
+    if (!win.isDestroyed()) win.webContents.send("tremor:event", event);
+  }
+}
+
 function parseBridgeStdout(chunk) {
   stdoutBuffer += chunk.toString("utf8");
   const lines = stdoutBuffer.split("\n");
@@ -67,6 +77,7 @@ function parseBridgeStdout(chunk) {
         logBridge(`status -> renderer: running=${event.running} "${event.message || ""}"`);
       }
       sendToRenderer("bridge:event", event);
+      sendToGameWindows(event);
     } catch (_err) {
       sendToRenderer("bridge:event", {
         type: "log",
@@ -199,6 +210,55 @@ app.whenReady().then(() => {
 
   ipcMain.handle("bridge:start", () => startBridge());
   ipcMain.handle("bridge:stop", () => stopBridge());
+
+  ipcMain.handle("report:save", async (_event, { html, filename }) => {
+    const { canceled, filePath: fp } = await dialog.showSaveDialog(mainWindow, {
+      title: "Save MotionBloom Report",
+      defaultPath: filename || "MotionBloom_Report.html",
+      filters: [{ name: "HTML Report", extensions: ["html"] }],
+    });
+    if (canceled || !fp) return { ok: false };
+    fs.writeFileSync(fp, html, "utf8");
+    shell.openPath(fp);
+    return { ok: true, path: fp };
+  });
+
+  ipcMain.handle("shell:openExternal", (_event, url) => {
+    if (typeof url === "string" && /^https?:\/\//.test(url)) {
+      shell.openExternal(url);
+      return { ok: true };
+    }
+    return { ok: false, reason: "invalid url" };
+  });
+
+  ipcMain.handle("game:launch", (_event, { url, name }) => {
+    const isLocal = typeof url === "string" && url.startsWith("mb-local://");
+    if (!isLocal && (typeof url !== "string" || !/^https?:\/\//.test(url))) {
+      return { ok: false, reason: "invalid url" };
+    }
+    const id = ++gameWinIdCounter;
+    const gameWin = new BrowserWindow({
+      width: 1280,
+      height: 820,
+      title: "MotionBloom \u00d7 " + (name || "Game"),
+      backgroundColor: "#000011",
+      webPreferences: {
+        preload: path.join(__dirname, "game-overlay-preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    if (isLocal) {
+      const localRel = url.replace("mb-local://", "");
+      gameWin.loadFile(path.join(__dirname, "games", localRel));
+    } else {
+      gameWin.loadURL(url);
+    }
+    gameWindows.set(id, gameWin);
+    gameWin.on("closed", () => gameWindows.delete(id));
+    logBridge(`game:launch id=${id} name="${name}" url=${url}`);
+    return { ok: true, id };
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

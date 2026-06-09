@@ -8,4 +8,7 @@ contextBridge.exposeInMainWorld("motionbloomBridge", {
     ipcRenderer.on("bridge:event", listener);
     return () => ipcRenderer.removeListener("bridge:event", listener);
   },
+  openExternal: (url) => ipcRenderer.invoke("shell:openExternal", url),
+  launchGame: (url, name) => ipcRenderer.invoke("game:launch", { url, name }),
+  saveReport: (html, filename) => ipcRenderer.invoke("report:save", { html, filename }),
 });

@@ -245,9 +245,15 @@ def main():
     detection_by_pose_family = {k: round(float(np.mean(v)), 4) for k, v in sorted(by_pose_family.items())}
 
     # Check acceptance criteria
+    # Minimum accepted ratio: if count >= 50, require >= 90% accepted (e.g., 45/50)
+    min_accepted_ratio = 0.90 if len(video_files) >= 50 else 1.0
+    min_accepted_count = int(np.ceil(len(video_files) * min_accepted_ratio))
+    enough_accepted = accepted >= min_accepted_count
+
     dataset_passes = (
         mean_rate >= 0.85 and
-        all(r["valid_frame_rate"] >= min_rate for r in per_video_results) if per_video_results else False
+        enough_accepted and
+        (all(r["valid_frame_rate"] >= min_rate for r in per_video_results) if per_video_results else False)
     )
 
     camera_all_pass = all(v >= 0.75 for v in detection_by_camera.values())
@@ -267,6 +273,8 @@ def main():
             "min_valid_frame_rate": round(min_rate_actual, 4),
             "dataset_passes_85_threshold": dataset_passes,
             "all_videos_pass_80_threshold": accepted == len(video_files),
+            "min_accepted_count": min_accepted_count,
+            "enough_accepted": enough_accepted,
         },
         "group_detection": {
             "by_camera_angle": detection_by_camera,
@@ -318,11 +326,14 @@ def main():
     overall_pass = dataset_passes and camera_all_pass and skin_all_pass and pose_all_pass
     if overall_pass:
         print(f"  ✓ DATASET PASSES ALL ACCEPTANCE CRITERIA")
+        print(f"    Accepted {accepted}/{len(video_files)} (need ≥{min_accepted_count})")
         print(f"    Ready to proceed with full generation.")
     else:
         print(f"  ✗ DATASET FAILS ACCEPTANCE CRITERIA")
         if not dataset_passes:
-            print(f"    - Mean rate {mean_rate:.1%} < 85% or not all videos pass ≥80%")
+            print(f"    - Mean rate {mean_rate:.1%} < 85% or not all pass ≥80%")
+        if not enough_accepted:
+            print(f"    - Accepted {accepted}/{len(video_files)} < required {min_accepted_count}")
         if not camera_all_pass:
             failing = [k for k, v in detection_by_camera.items() if v < 0.75]
             print(f"    - Camera groups below 75%: {failing}")

@@ -1,0 +1,109 @@
+{
+  "timestamp": "2026-06-09 14:54:07",
+  "dataset_path": "/Users/aharshi/MotionBloomAppVersion/motionbloomtremor/datasets/synth_tremor_smoke",
+  "total_videos": 5,
+  "accepted": 5,
+  "rejected": 0,
+  "elapsed_seconds": 1.2,
+  "aggregate": {
+    "mean_valid_frame_rate": 1.0,
+    "min_valid_frame_rate": 1.0,
+    "dataset_passes_85_threshold": true,
+    "all_videos_pass_80_threshold": true
+  },
+  "group_detection": {
+    "by_camera_angle": {
+      "front_above": 1.0,
+      "front_high": 1.0,
+      "oblique_high": 1.0,
+      "oblique_r": 1.0
+    },
+    "by_skin_tone": {
+      "light": 1.0,
+      "light_warm": 1.0,
+      "medium_light": 1.0,
+      "medium_warm": 1.0
+    },
+    "by_pose_family": {
+      "finger_spread": 1.0,
+      "pinch": 1.0
+    },
+    "camera_all_above_75": true,
+    "skin_all_above_75": true,
+    "pose_all_above_70": true
+  },
+  "acceptance_criteria": {
+    "per_video_min": 0.8,
+    "dataset_mean_min": 0.85,
+    "camera_group_min": 0.75,
+    "skin_tone_group_min": 0.75,
+    "pose_family_group_min": 0.7
+  },
+  "per_video": [
+    {
+      "video_id": "MB_SYNTH_000001",
+      "valid_frame_rate": 1.0,
+      "total_frames": 30,
+      "detected_frames": 30,
+      "consecutive_valid_run_max": 30,
+      "mean_hand_bbox_area": 0.0272,
+      "detection_fail_frames": 0,
+      "camera_angle": "front_high",
+      "pose_family": "pinch",
+      "skin_tone_id": "light",
+      "accepted_for_training": true
+    },
+    {
+      "video_id": "MB_SYNTH_000002",
+      "valid_frame_rate": 1.0,
+      "total_frames": 30,
+      "detected_frames": 30,
+      "consecutive_valid_run_max": 30,
+      "mean_hand_bbox_area": 0.0564,
+      "detection_fail_frames": 0,
+      "camera_angle": "oblique_high",
+      "pose_family": "pinch",
+      "skin_tone_id": "medium_warm",
+      "accepted_for_training": true
+    },
+    {
+      "video_id": "MB_SYNTH_000003",
+      "valid_frame_rate": 1.0,
+      "total_frames": 30,
+      "detected_frames": 30,
+      "consecutive_valid_run_max": 30,
+      "mean_hand_bbox_area": 0.0207,
+      "detection_fail_frames": 0,
+      "camera_angle": "front_above",
+      "pose_family": "pinch",
+      "skin_tone_id": "medium_warm",
+      "accepted_for_training": true
+    },
+    {
+      "video_id": "MB_SYNTH_000004",
+      "valid_frame_rate": 1.0,
+      "total_frames": 30,
+      "detected_frames": 30,
+      "consecutive_valid_run_max": 30,
+      "mean_hand_bbox_area": 0.036,
+      "detection_fail_frames": 0,
+      "camera_angle": "oblique_r",
+      "pose_family": "finger_spread",
+      "skin_tone_id": "medium_light",
+      "accepted_for_training": true
+    },
+    {
+      "video_id": "MB_SYNTH_000005",
+      "valid_frame_rate": 1.0,
+      "total_frames": 30,
+      "detected_frames": 30,
+      "consecutive_valid_run_max": 30,
+      "mean_hand_bbox_area": 0.0844,
+      "detection_fail_frames": 0,
+      "camera_angle": "oblique_high",
+      "pose_family": "finger_spread",
+      "skin_tone_id": "light_warm",
+      "accepted_for_training": true
+    }
+  ]
+}

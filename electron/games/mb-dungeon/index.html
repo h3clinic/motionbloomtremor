@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Dungeon</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0808;overflow:hidden;display:flex;align-items:center;justify-content:center}
+canvas{display:block;image-rendering:pixelated}
+#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:24px;
+     background:rgba(0,0,0,.75);backdrop-filter:blur(8px);padding:7px 22px;
+     border-radius:20px;color:#fff;font:700 13px system-ui;z-index:5;white-space:nowrap;
+     border:1px solid rgba(255,255,255,.1)}
+#msg{position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;flex-direction:column;
+     align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 40px/1 system-ui;letter-spacing:.03em;margin-bottom:12px;color:#a78bfa}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+.k{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 8px;font:700 12px monospace}
+button{margin-top:20px;background:#7c3aed;color:#fff;border:none;padding:12px 32px;
+       border-radius:12px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:14px;font:700 16px system-ui;color:#facc15;min-height:22px}
+#hp-bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+        display:flex;align-items:center;gap:10px;color:#fff;font:700 12px system-ui;z-index:5}
+.hp-track{width:140px;height:9px;background:rgba(255,255,255,.15);border-radius:5px;overflow:hidden}
+.hp-fill{height:100%;background:#e63946;border-radius:5px;transition:width .2s}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span>Score <b id="score">0</b></span>
+  <span>Floor <b id="floor">1</b></span>
+  <span>Kills <b id="kills">0</b></span>
+  <span>Tremor <b id="trm">--</b></span>
+</div>
+<canvas id="c"></canvas>
+<div id="hp-bar"><span>HP</span><div class="hp-track"><div class="hp-fill" id="hp-fill" style="width:100%"></div></div><span id="hp-num">10</span></div>
+<div id="msg">
+  <h1>MB Dungeon</h1>
+  <p class="sub">Dark Crawler — explore procedural floors, defeat enemies, find the exit.</p>
+  <p class="sub" style="margin-top:8px">
+    <span class="k">W A S D</span> or <span class="k">Arrow keys</span> to move — bump enemies to attack.<br>
+    Higher tremor = chance to drift in the wrong direction.
+  </p>
+  <button id="startBtn">Descend</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const TILE=32,COLS=24,ROWS=18;
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+cv.width=COLS*TILE; cv.height=ROWS*TILE;
+
+let ts=0;
+function poll(){ if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore; document.getElementById('trm').textContent=Math.round(ts)+'%'; }
+
+// Tile types
+const T={WALL:0,FLOOR:1,DOOR:2,EXIT:3};
+const ENEMY_CLR=['#ef4444','#f97316','#eab308','#22c55e','#06b6d4'];
+
+let map,player,enemies,score,kills,floor,running,moveQ,inputCd;
+
+function mkMap(){
+  const g=Array.from({length:ROWS},()=>Array(COLS).fill(T.WALL));
+  const rooms=[];
+  // Place 5-8 rooms
+  const n=5+Math.floor(Math.random()*4);
+  for(let attempt=0;attempt<120;attempt++){
+    const w=5+Math.floor(Math.random()*6);
+    const h=4+Math.floor(Math.random()*5);
+    const x=1+Math.floor(Math.random()*(COLS-w-2));
+    const y=1+Math.floor(Math.random()*(ROWS-h-2));
+    if(rooms.some(r=>x<r.x+r.w+2&&x+w>r.x-2&&y<r.y+r.h+2&&y+h>r.y-2)) continue;
+    rooms.push({x,y,w,h,cx:x+Math.floor(w/2),cy:y+Math.floor(h/2)});
+    if(rooms.length>=n) break;
+  }
+  // Carve rooms
+  rooms.forEach(r=>{ for(let ty=r.y;ty<r.y+r.h;ty++) for(let tx=r.x;tx<r.x+r.w;tx++) g[ty][tx]=T.FLOOR; });
+  // Connect rooms with corridors
+  for(let i=1;i<rooms.length;i++){
+    const a=rooms[i-1],b=rooms[i];
+    let cx=a.cx,cy=a.cy;
+    while(cx!==b.cx){ g[cy][cx]=T.FLOOR; cx+=cx<b.cx?1:-1; }
+    while(cy!==b.cy){ g[cy][cx]=T.FLOOR; cy+=cy<b.cy?1:-1; }
+  }
+  return {g,rooms};
+}
+
+function start(){
+  score=0; kills=0; floor=1; running=true; inputCd=0;
+  buildFloor();
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  requestAnimationFrame(frame);
+}
+
+function buildFloor(){
+  const {g,rooms}=mkMap();
+  map=g;
+  const sr=rooms[0];
+  player={x:sr.cx,y:sr.cy,hp:10,maxHp:10,atk:2};
+  enemies=[];
+  rooms.slice(1).forEach((r,i)=>{
+    const cnt=1+Math.floor(Math.random()*2);
+    for(let k=0;k<cnt;k++){
+      let ex,ey;
+      do{ ex=r.x+1+Math.floor(Math.random()*(r.w-2)); ey=r.y+1+Math.floor(Math.random()*(r.h-2)); }
+      while(enemies.some(e=>e.x===ex&&e.y===ey));
+      enemies.push({x:ex,y:ey,hp:3,maxHp:3,atk:1,color:ENEMY_CLR[i%ENEMY_CLR.length],stun:0});
+    }
+  });
+  // Place exit in last room
+  const lr=rooms[rooms.length-1];
+  map[lr.cy][lr.cx]=T.EXIT;
+  updateUI();
+}
+
+function updateUI(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('floor').textContent=floor;
+  document.getElementById('kills').textContent=kills;
+  const pct=Math.round(player.hp/player.maxHp*100);
+  document.getElementById('hp-fill').style.width=pct+'%';
+  document.getElementById('hp-num').textContent=player.hp;
+}
+
+const keys={};
+document.addEventListener('keydown',e=>{
+  keys[e.code]=true;
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'].includes(e.code)) e.preventDefault();
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+let last=0;
+function frame(ts_){
+  if(!running) return;
+  const dt=ts_-last; last=ts_;
+  poll();
+  inputCd=Math.max(0,inputCd-dt);
+  if(inputCd<=0) handleInput();
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function handleInput(){
+  let dx=0,dy=0;
+  if(keys['ArrowUp']   ||keys['KeyW']) dy=-1;
+  if(keys['ArrowDown'] ||keys['KeyS']) dy= 1;
+  if(keys['ArrowLeft'] ||keys['KeyA']) dx=-1;
+  if(keys['ArrowRight']||keys['KeyD']) dx= 1;
+  if(!dx&&!dy) return;
+
+  // Tremor drift: chance of wrong direction
+  if(Math.random()<ts/350){
+    if(dx!==0&&Math.random()<.5) dy=Math.random()<.5?1:-1;
+    else if(dy!==0&&Math.random()<.5) dx=Math.random()<.5?1:-1;
+    else if(dx!==0) dx=-dx;
+    else dy=-dy;
+  }
+
+  const nx=player.x+dx, ny=player.y+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS) return;
+
+  // Bump enemy?
+  const hit=enemies.find(e=>e.x===nx&&e.y===ny&&e.hp>0);
+  if(hit){
+    hit.hp-=player.atk; hit.stun=300;
+    score+=10;
+    if(hit.hp<=0){ kills++; enemies=enemies.filter(e=>e!==hit); score+=50; }
+    inputCd=180; updateUI(); return;
+  }
+
+  const tile=map[ny]?map[ny][nx]:T.WALL;
+  if(tile===T.WALL){ inputCd=80; return; }
+  player.x=nx; player.y=ny;
+  inputCd=160;
+
+  if(tile===T.EXIT){ floor++; score+=200; buildFloor(); return; }
+
+  // Enemy turns
+  enemies.forEach(e=>{
+    if(e.stun>0){ e.stun-=160; return; }
+    const gdx=Math.sign(player.x-e.x), gdy=Math.sign(player.y-e.y);
+    const steps=[[gdx,0],[0,gdy],[gdx,gdy],[-gdx,0],[0,-gdy]];
+    for(const [ex,ey] of steps){
+      const tx=e.x+ex, ty=e.y+ey;
+      if(tx<0||ty<0||tx>=COLS||ty>=ROWS) continue;
+      if(map[ty][tx]===T.WALL) continue;
+      if(tx===player.x&&ty===player.y){
+        player.hp=Math.max(0,player.hp-e.atk);
+        if(player.hp<=0){ running=false; endGame(); return; }
+        updateUI(); return;
+      }
+      if(!enemies.some(o=>o.x===tx&&o.y===ty)){ e.x=tx; e.y=ty; break; }
+    }
+  });
+  updateUI();
+}
+
+const TILE_CLR={[T.WALL]:'#1a0f0f',[T.FLOOR]:'#2a1f1f',[T.EXIT]:'#7c3aed'};
+function draw(){
+  ctx.fillStyle='#0a0808'; ctx.fillRect(0,0,cv.width,cv.height);
+
+  // Tiles
+  for(let ty=0;ty<ROWS;ty++) for(let tx=0;tx<COLS;tx++){
+    const t=map[ty][tx];
+    if(t===T.WALL){
+      ctx.fillStyle='#1a0f0f'; ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+    } else {
+      ctx.fillStyle=t===T.EXIT?'#2d1659':'#2a1f1f'; ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+      if(t===T.EXIT){
+        ctx.strokeStyle='#a78bfa'; ctx.lineWidth=1.5;
+        ctx.strokeRect(tx*TILE+2,ty*TILE+2,TILE-4,TILE-4);
+        ctx.fillStyle='#a78bfa'; ctx.font='bold 14px system-ui'; ctx.textAlign='center';
+        ctx.fillText('EXIT',tx*TILE+TILE/2,ty*TILE+TILE/2+5);
+      }
+    }
+  }
+  // Grid lines (subtle)
+  ctx.strokeStyle='rgba(0,0,0,.4)'; ctx.lineWidth=0.5;
+  for(let ty=0;ty<ROWS;ty++) for(let tx=0;tx<COLS;tx++){
+    if(map[ty][tx]!==T.WALL) ctx.strokeRect(tx*TILE,ty*TILE,TILE,TILE);
+  }
+
+  // Enemies
+  enemies.forEach(e=>{
+    ctx.fillStyle=e.stun>0?'rgba(255,255,255,.5)':e.color;
+    const pad=5;
+    ctx.fillRect(e.x*TILE+pad,e.y*TILE+pad,TILE-pad*2,TILE-pad*2);
+    // HP bar
+    const bw=TILE-8, bh=3;
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(e.x*TILE+4,e.y*TILE+2,bw,bh);
+    ctx.fillStyle=e.color; ctx.fillRect(e.x*TILE+4,e.y*TILE+2,bw*e.hp/e.maxHp,bh);
+  });
+
+  // Player
+  const jx=(Math.random()-.5)*ts*.05, jy=(Math.random()-.5)*ts*.05;
+  ctx.fillStyle='#fff';
+  ctx.fillRect((player.x+jx)*TILE+4,(player.y+jy)*TILE+4,TILE-8,TILE-8);
+  ctx.fillStyle='#e63946';
+  ctx.fillRect((player.x+jx)*TILE+TILE/2-3,(player.y+jy)*TILE+5,6,6);
+}
+
+function endGame(){
+  document.getElementById('msg').classList.remove('gone');
+  document.getElementById('result').textContent='Defeated on floor '+floor+' — score: '+score;
+  document.getElementById('startBtn').textContent='Descend Again';
+}
+
+document.getElementById('startBtn').addEventListener('click',start);
+draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Maze · Calm Path</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0f1a;overflow:hidden;display:flex;align-items:center;justify-content:center}
+canvas{border-radius:8px}
+#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:20px;background:rgba(0,0,0,.7);padding:8px 20px;border-radius:20px;color:#fff;font:700 13px system-ui;white-space:nowrap;z-index:5}
+#msg{position:fixed;inset:0;background:rgba(0,0,0,.87);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 38px/1 system-ui;color:#8b5cf6;margin-bottom:10px}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+.k{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 7px;font:700 12px monospace}
+button{margin-top:18px;background:#8b5cf6;color:#fff;border:none;padding:11px 30px;border-radius:11px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:12px;font:700 16px system-ui;color:#facc15;min-height:22px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span>Time <b id="timer">0</b>s</span>
+  <span>Steps <b id="steps">0</b></span>
+  <span>Tremor <b id="trm">—</b></span>
+</div>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h1>🌀 MB Maze</h1>
+  <p class="sub">Calm Path · tremor drifts you off course!</p>
+  <p class="sub" style="margin-top:8px">
+    <span class="k">↑ ↓ ← →</span>&nbsp; or &nbsp;<span class="k">W A S D</span>
+    &nbsp;· Reach the 🌸 exit
+  </p>
+  <button id="startBtn">Start</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const COLS=21,ROWS=15; // must be odd
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+
+let CELL,maze,px,py,steps,startTime,running,mdt=0;
+let ts=0,tf=5,lastT=performance.now();
+let trail=[];
+
+function computeCell(){
+  return Math.min(
+    Math.floor((window.innerWidth-20)/COLS),
+    Math.floor((window.innerHeight-80)/ROWS)
+  );
+}
+
+function resize(){
+  CELL=computeCell();
+  cv.width=COLS*CELL; cv.height=ROWS*CELL;
+}
+resize(); window.addEventListener('resize',resize);
+
+function poll(){
+  if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore;
+  if(typeof window._mbTremorFreq==='number')  tf=Math.max(1,window._mbTremorFreq);
+  document.getElementById('trm').textContent=Math.round(ts)+'%';
+}
+
+// DFS recursive backtracker maze generation
+function generateMaze(){
+  maze=Array.from({length:ROWS},()=>Array(COLS).fill(1));
+  function carve(x,y){
+    maze[y][x]=0;
+    const dirs=[[0,-2],[0,2],[-2,0],[2,0]].sort(()=>Math.random()-.5);
+    for(const [dx,dy] of dirs){
+      const nx=x+dx,ny=y+dy;
+      if(nx>=0&&ny>=0&&nx<COLS&&ny<ROWS&&maze[ny][nx]===1){
+        maze[y+dy/2][x+dx/2]=0;
+        carve(nx,ny);
+      }
+    }
+  }
+  carve(1,1);
+  maze[ROWS-2][COLS-2]=0;
+}
+
+function startGame(){
+  generateMaze();
+  px=1; py=1; steps=0; trail=[];
+  startTime=Date.now(); running=true; mdt=0;
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  lastT=performance.now();
+  requestAnimationFrame(frame);
+}
+
+const keys={};
+document.addEventListener('keydown',e=>{keys[e.code]=true;e.preventDefault();});
+document.addEventListener('keyup',  e=>{keys[e.code]=false;});
+
+const MOVE_MS=120;
+
+function frame(ts_){
+  if(!running) return;
+  poll();
+  const dt=ts_-lastT; lastT=ts_;
+  mdt+=dt;
+
+  document.getElementById('timer').textContent=((Date.now()-startTime)/1000|0);
+  document.getElementById('steps').textContent=steps;
+
+  if(mdt>=MOVE_MS){
+    mdt=0;
+    let dx=0,dy=0;
+    if(keys['ArrowUp']   ||keys['KeyW']) dy=-1;
+    if(keys['ArrowDown'] ||keys['KeyS']) dy= 1;
+    if(keys['ArrowLeft'] ||keys['KeyA']) dx=-1;
+    if(keys['ArrowRight']||keys['KeyD']) dx= 1;
+
+    // Tremor drift: occasionally flip or add perpendicular
+    if((dx!==0||dy!==0)&&Math.random()<ts/1500){
+      if(dx!==0) dy=Math.random()<.5?1:-1;
+      else       dx=Math.random()<.5?1:-1;
+    }
+
+    if(dx!==0||dy!==0){
+      const nx=px+dx,ny=py+dy;
+      if(nx>=0&&ny>=0&&nx<COLS&&ny<ROWS&&maze[ny][nx]===0){
+        trail.push({x:px,y:py});
+        if(trail.length>40) trail.shift();
+        px=nx; py=ny; steps++;
+      }
+    }
+    if(px===COLS-2&&py===ROWS-2){ running=false; endGame(); return; }
+  }
+
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function draw(){
+  ctx.fillStyle='#0a0f1a'; ctx.fillRect(0,0,cv.width,cv.height);
+  for(let y=0;y<ROWS;y++){
+    for(let x=0;x<COLS;x++){
+      if(maze[y][x]===1){
+        ctx.fillStyle='#1a2540';
+        ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+        ctx.fillStyle='#0f1830';
+        ctx.fillRect(x*CELL,y*CELL,CELL,1);
+        ctx.fillRect(x*CELL,y*CELL,1,CELL);
+      }
+    }
+  }
+  // Trail
+  trail.forEach((t,i)=>{
+    const alpha=i/trail.length*0.35;
+    ctx.fillStyle=`rgba(139,92,246,${alpha})`;
+    ctx.fillRect(t.x*CELL+CELL/4,t.y*CELL+CELL/4,CELL/2,CELL/2);
+  });
+  // Exit marker
+  ctx.font=`${CELL*.7}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('🌸',(COLS-2)*CELL+CELL/2,(ROWS-2)*CELL+CELL/2);
+  // Player with tremor jitter
+  const jx=(Math.random()-.5)*ts*.08, jy=(Math.random()-.5)*ts*.08;
+  const cx=px*CELL+CELL/2+jx, cy=py*CELL+CELL/2+jy;
+  ctx.fillStyle='#8b5cf6';
+  ctx.beginPath();ctx.arc(cx,cy,CELL/2-3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.55)';
+  ctx.beginPath();ctx.arc(cx-CELL*.07,cy-CELL*.07,CELL*.12,0,Math.PI*2);ctx.fill();
+}
+
+function endGame(){
+  const t=((Date.now()-startTime)/1000).toFixed(1);
+  document.getElementById('msg').classList.remove('gone');
+  document.getElementById('result').textContent=`🎉 Escaped in ${t}s · ${steps} steps`;
+  document.getElementById('startBtn').textContent='Play Again';
+}
+
+document.getElementById('startBtn').addEventListener('click',startGame);
+ctx.fillStyle='#0a0f1a'; ctx.fillRect(0,0,800,600);
+</script>
+</body>
+</html>

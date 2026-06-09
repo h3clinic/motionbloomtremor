@@ -3,6 +3,7 @@
 #
 # Usage:
 #   ./handharness/run_pipeline.sh smoke   # Quick test (5 videos × 1s)
+#   ./handharness/run_pipeline.sh mini50  # Validation (50 videos × 2s)
 #   ./handharness/run_pipeline.sh full    # Full dataset (3000 videos × 4s)
 #
 set -euo pipefail
@@ -21,13 +22,20 @@ case "$MODE" in
   smoke)
     COUNT=5; DURATION=1; SEED=123
     DATASET="$PROJECT_DIR/datasets/synth_tremor_smoke"
+    RENDER_FLAG="--smoke"
+    ;;
+  mini50)
+    COUNT=50; DURATION=2; SEED=456
+    DATASET="$PROJECT_DIR/datasets/synth_tremor_mini50"
+    RENDER_FLAG="--mini50"
     ;;
   full)
     COUNT=3000; DURATION=4; SEED=42
     DATASET="$PROJECT_DIR/datasets/synth_tremor_v2"
+    RENDER_FLAG=""
     ;;
   *)
-    echo "Usage: $0 {smoke|full}"
+    echo "Usage: $0 {smoke|mini50|full}"
     exit 1
     ;;
 esac
@@ -48,7 +56,26 @@ echo "▶ Phase 1: Rendering videos..."
   --asset "$ASSET" \
   --rig-map "$RIG_MAP" \
   --count "$COUNT" --fps "$FPS" --duration "$DURATION" \
-  --out "$DATASET" --seed "$SEED"
+  --out "$DATASET" --seed "$SEED" $RENDER_FLAG
+echo
+
+# Phase 1.5: Check detectability
+echo "▶ Phase 1.5: Checking detectability..."
+MIN_RATE=0.80
+if [ "$MODE" = "mini50" ]; then
+  MIN_RATE=0.80
+  echo "  (mini50 mode: mean≥85%, each≥80%, ≥45/50 accepted, group thresholds)"
+fi
+"$PYTHON" "$SCRIPT_DIR/check_detectability.py" \
+  --dataset "$DATASET" \
+  --model "$MODEL" \
+  --min-valid-frame-rate "$MIN_RATE"
+DETECT_EXIT=$?
+if [ $DETECT_EXIT -ne 0 ]; then
+  echo "  ✗ Detectability check FAILED. Pipeline halted."
+  exit 1
+fi
+echo "  ✓ Detectability check passed."
 echo
 
 # Phase 2: Extract landmarks

@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MotionBloom FPS · Tremor Gauntlet</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#000;overflow:hidden}
+canvas{display:block}
+#msg{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;
+     justify-content:center;background:rgba(0,0,0,.88);color:#fff;text-align:center;z-index:20}
+#msg.gone{display:none}
+h1{font:900 38px/1 system-ui,sans-serif;color:#e63946;letter-spacing:.04em;margin-bottom:10px}
+.sub{font:14px/1.7 system-ui,sans-serif;color:rgba(255,255,255,.6)}
+.k{background:rgba(255,255,255,.13);border-radius:4px;padding:1px 8px;
+   font:700 12px monospace;color:#fff;white-space:nowrap}
+.tip{font:700 13px system-ui;color:#facc15;margin-top:14px;line-height:1.7}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="msg" id="msg">
+  <h1>🌸 MotionBloom FPS</h1>
+  <p class="sub" style="font-size:16px;color:#fff;margin-bottom:18px">Tremor Gauntlet</p>
+  <p class="sub">
+    <span class="k">W A S D</span> move &nbsp;
+    <span class="k">Mouse</span> look &nbsp;
+    <span class="k">Click / Space</span> shoot &nbsp;
+    <span class="k">ESC</span> pause
+  </p>
+  <p class="tip">
+    🎯 Your live tremor score controls weapon sway<br>
+    Keep tremor LOW → steady aim → eliminate targets
+  </p>
+  <p class="sub" style="margin-top:22px;color:#aaa">Click anywhere to start</p>
+</div>
+<script>
+'use strict';
+// ─── CONFIG ────────────────────────────────────────────────────────────────
+const W = window.innerWidth  | 0;
+const H = window.innerHeight | 0;
+const FOV     = Math.PI / 3;            // 60°
+const PLANE   = Math.tan(FOV / 2);      // camera half-plane length
+const MAX_D   = 20;
+const MOV_SPD = 0.055;
+const ROT_SPD = 0.0026;
+
+// ─── MAP (20×20) ───────────────────────────────────────────────────────────
+// 0=open  1=red   2=blue  3=brown  4=green  5=purple
+const MAP_W = 20, MAP_H = 20;
+const RAW_MAP = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,2,2,2,2,0,0,0,0,0,0,2,2,2,2,0,0,1],
+  [1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,1],
+  [1,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,1],
+  [1,0,0,2,2,2,0,0,0,0,0,0,0,0,2,2,2,0,0,1],
+  [1,0,0,0,0,0,0,0,0,3,3,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,3,3,3,0,0,0,3,0,0,0,0,0,3,3,3,0,1],
+  [1,0,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,3,0,1],
+  [1,0,0,3,0,0,0,0,0,3,0,0,0,0,0,0,0,3,0,1],
+  [1,0,0,3,3,3,0,0,0,3,3,0,0,0,0,3,3,3,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,0,0,0,4,4,4,0,0,0,0,4,4,4,0,0,0,0,1],
+  [1,0,0,0,0,4,0,0,0,0,0,0,0,0,4,0,0,0,0,1],
+  [1,0,0,0,0,4,0,5,5,5,5,5,5,0,4,0,0,0,0,1],
+  [1,0,0,0,0,4,0,5,0,0,0,0,5,0,4,0,0,0,0,1],
+  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+];
+
+// Wall face colours: [bright, dark]
+const WALL_CLR = [
+  null,
+  [[0x8b,0x00,0x00],[0x5a,0x00,0x00]],
+  [[0x1a,0x4a,0x8a],[0x0e,0x2a,0x5a]],
+  [[0x6b,0x4a,0x00],[0x3d,0x28,0x00]],
+  [[0x0a,0x6b,0x18],[0x05,0x3d,0x0c]],
+  [[0x5a,0x0a,0x7a],[0x30,0x04,0x48]],
+];
+
+// ─── PLAYER ────────────────────────────────────────────────────────────────
+let px = 1.5, py = 1.5, pa = 0.3;
+let hp = 100, score = 0, ammo = 40;
+let gameOver = false, gameWon = false;
+let shootCd = 0, shotFlash = 0, hurtFlash = 0;
+
+// ─── ENEMIES ───────────────────────────────────────────────────────────────
+const SPAWN = [
+  [3.5,8.5],[8.5,3.5],[14.5,5.5],[17.5,12.5],
+  [11.5,10.5],[5.5,15.5],[14.5,15.5],[10.5,17.5],
+];
+let enemies = SPAWN.map(([x,y]) => ({x,y,hp:3,dead:false}));
+const E_SPD = 0.007;
+
+// ─── INPUT ─────────────────────────────────────────────────────────────────
+const keys = {};
+let mdx = 0, locked = false;
+
+// ─── TREMOR (fed by game-overlay-preload.js or bridge) ─────────────────────
+let tremorScore = 0, tremorFreq = 5;
+const MAX_SWAY = 55;
+
+function pollTremor() {
+  if (typeof window._mbTremorScore === 'number') tremorScore = window._mbTremorScore;
+  if (typeof window._mbTremorFreq  === 'number') tremorFreq  = Math.max(1, window._mbTremorFreq);
+}
+
+// ─── CANVAS SETUP ──────────────────────────────────────────────────────────
+const cv  = document.getElementById('c');
+const ctx = cv.getContext('2d');
+cv.width  = W;
+cv.height = H;
+
+// ─── POINTER LOCK + INPUT ──────────────────────────────────────────────────
+cv.addEventListener('click', () => {
+  if (!locked)  cv.requestPointerLock();
+  if (gameOver) restartGame();
+});
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === cv;
+  document.getElementById('msg').classList.toggle('gone', locked);
+});
+document.addEventListener('keydown', e => { keys[e.code] = true;  e.preventDefault(); });
+document.addEventListener('keyup',   e => { keys[e.code] = false; });
+document.addEventListener('mousemove', e => { if (locked) mdx += e.movementX; });
+cv.addEventListener('mousedown', e => { if (locked && e.button === 0) shoot(); });
+
+// ─── MAP HELPERS ───────────────────────────────────────────────────────────
+function tileAt(x, y) {
+  const mx = x|0, my = y|0;
+  if (mx<0||my<0||mx>=MAP_W||my>=MAP_H) return 1;
+  return RAW_MAP[my][mx];
+}
+function canWalk(nx, ny) {
+  const r = 0.22;
+  return tileAt(nx-r,ny-r)===0 && tileAt(nx+r,ny-r)===0
+      && tileAt(nx-r,ny+r)===0 && tileAt(nx+r,ny+r)===0;
+}
+function d2(ax,ay,bx,by){ return Math.sqrt((ax-bx)**2+(ay-by)**2); }
+
+// ─── RAYCASTER ─────────────────────────────────────────────────────────────
+const zbuf  = new Float32Array(W);
+const imgd  = ctx.createImageData(W, H);
+const pixels= imgd.data;
+
+function castRays() {
+  const cosA = Math.cos(pa), sinA = Math.sin(pa);
+
+  for (let sx = 0; sx < W; sx++) {
+    const camX  = 2*sx/W - 1;                     // -1..1
+    const rdx   = cosA - sinA*camX*PLANE;
+    const rdy   = sinA + cosA*camX*PLANE;
+
+    let mx=px|0, my=py|0;
+    const ddx = rdx===0 ? 1e30 : Math.abs(1/rdx);
+    const ddy = rdy===0 ? 1e30 : Math.abs(1/rdy);
+    let stepx, stepy, sdx, sdy;
+    if (rdx<0){ stepx=-1; sdx=(px-mx)*ddx; } else { stepx=1; sdx=(mx+1-px)*ddx; }
+    if (rdy<0){ stepy=-1; sdy=(py-my)*ddy; } else { stepy=1; sdy=(my+1-py)*ddy; }
+
+    let hit=0, side=0, steps=0;
+    while(!hit && steps++<MAX_D*2){
+      if(sdx<sdy){ sdx+=ddx; mx+=stepx; side=0; }
+      else       { sdy+=ddy; my+=stepy; side=1; }
+      hit = tileAt(mx,my);
+    }
+
+    const perp = side===0
+      ? (mx-px+(1-stepx)/2)/rdx
+      : (my-py+(1-stepy)/2)/rdy;
+    zbuf[sx] = perp;
+
+    const lh  = Math.min(H, (H/perp)|0);
+    const top = ((H-lh)/2)|0;
+    const bot = top+lh;
+    const clr = WALL_CLR[hit>0&&hit<WALL_CLR.length?hit:1];
+    const c   = side===0 ? clr[0] : clr[1];
+    const sh  = Math.max(0, Math.min(1, 1-perp/MAX_D));
+    const r   = (c[0]*sh)|0, g=(c[1]*sh)|0, b=(c[2]*sh)|0;
+
+    for (let y=0; y<H; y++){
+      const i=(y*W+sx)*4;
+      if(y<top){             // ceiling
+        const t=y/Math.max(1,top);
+        pixels[i]=8+t*18; pixels[i+1]=8+t*22; pixels[i+2]=26+t*44; pixels[i+3]=255;
+      } else if(y>=bot){     // floor
+        const t=1-(y-bot)/Math.max(1,H-bot);
+        const v=(16+t*22)|0;
+        pixels[i]=v; pixels[i+1]=v; pixels[i+2]=v; pixels[i+3]=255;
+      } else {               // wall
+        pixels[i]=r; pixels[i+1]=g; pixels[i+2]=b; pixels[i+3]=255;
+      }
+    }
+  }
+  ctx.putImageData(imgd,0,0);
+}
+
+// ─── SPRITE (ENEMY) RENDERER ───────────────────────────────────────────────
+function drawEnemies() {
+  const cosA=Math.cos(pa), sinA=Math.sin(pa);
+  // Sort far to near
+  const vis = enemies
+    .filter(e=>!e.dead)
+    .map(e=>{
+      const rx=e.x-px, ry=e.y-py;
+      // Lode-style transform
+      const plX=-sinA*PLANE, plY=cosA*PLANE;
+      const invd=1/(plX*sinA - cosA*plY);
+      const tx=invd*(sinA*rx - cosA*ry);       // screen fraction
+      const tz=invd*(-plY*rx + plX*ry);        // depth (perpendicular)
+      return {...e, tx, tz};
+    })
+    .filter(e=>e.tz>0.15)
+    .sort((a,b)=>b.tz-a.tz);
+
+  for(const e of vis){
+    const screenX = ((W/2)*(1+e.tx/e.tz))|0;
+    const sh = Math.min(H*2, (H/e.tz)|0);
+    const sw = sh;
+    const sy = ((H-sh)/2)|0;
+    const sxLeft = screenX-(sw/2)|0;
+
+    const midCol = Math.max(0,Math.min(W-1,screenX));
+    if(e.tz >= zbuf[midCol]) continue;
+
+    const s = Math.max(0,Math.min(1,1-e.tz/MAX_D));
+    // Body
+    ctx.fillStyle=`rgb(${(180*s)|0},${(55*s)|0},${(55*s)|0})`;
+    ctx.fillRect(sxLeft+sw*.12, sy+sh*.3, sw*.76, sh*.65);
+    // Head
+    ctx.fillStyle=`rgb(${(215*s)|0},${(165*s)|0},${(120*s)|0})`;
+    ctx.fillRect(sxLeft+sw*.22, sy+sh*.03, sw*.56, sh*.28);
+    // Eyes
+    const ew=Math.max(1,(sw*.09)|0), eh=Math.max(1,(sh*.09)|0);
+    ctx.fillStyle='#000';
+    ctx.fillRect(sxLeft+(sw*.3)|0, sy+(sh*.1)|0, ew, eh);
+    ctx.fillRect(sxLeft+(sw*.58)|0,sy+(sh*.1)|0, ew, eh);
+    // HP bar
+    if(e.hp<3){
+      ctx.fillStyle='#400';
+      ctx.fillRect(sxLeft, sy-7, sw, 4);
+      ctx.fillStyle='#e63946';
+      ctx.fillRect(sxLeft, sy-7, sw*(e.hp/3), 4);
+    }
+  }
+}
+
+// ─── WEAPON ────────────────────────────────────────────────────────────────
+function drawWeapon(){
+  const t = Date.now()/1000;
+  const amp = (tremorScore/100)*MAX_SWAY;
+  const swX = Math.sin(t*tremorFreq)*amp + Math.sin(t*tremorFreq*0.6)*amp*0.4;
+  const swY = Math.cos(t*tremorFreq*0.9)*amp*0.35;
+
+  const wW=(W*0.21)|0, wH=(H*0.3)|0;
+  const wx=(W/2-wW/2+swX)|0;
+  const wy=(H-wH+swY+(shootCd>0?14:0))|0;
+
+  // grip
+  ctx.fillStyle='#3d2a14'; ctx.fillRect(wx+wW*.36,wy+wH*.64,wW*.28,wH*.32);
+  // body
+  ctx.fillStyle='#303030'; ctx.fillRect(wx+wW*.18,wy+wH*.28,wW*.64,wH*.45);
+  // slide
+  ctx.fillStyle='#404040'; ctx.fillRect(wx+wW*.22,wy+wH*.2,wW*.56,wH*.28);
+  // barrel
+  ctx.fillStyle='#1a1a1a'; ctx.fillRect(wx+wW*.44,wy+wH*.06,wW*.12,wH*.22);
+  // trigger guard
+  ctx.strokeStyle='#555'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.arc(wx+wW*.5, wy+wH*.76, wW*.09, 0, Math.PI);
+  ctx.stroke();
+
+  if(shotFlash>0){
+    ctx.fillStyle=`rgba(255,190,40,${shotFlash/10})`;
+    ctx.beginPath();
+    ctx.arc(wx+wW*.5+swX*.08, wy+wH*.06, wW*.14, 0, Math.PI*2);
+    ctx.fill();
+    shotFlash--;
+  }
+  // Store sway for crosshair
+  window._wSwX=swX; window._wSwY=swY;
+}
+
+// ─── CROSSHAIR ─────────────────────────────────────────────────────────────
+function drawCrosshair(){
+  const cx=W/2+(window._wSwX||0)*0.28;
+  const cy=H/2+(window._wSwY||0)*0.28;
+  const sz=9, gap=3;
+  ctx.strokeStyle=tremorScore>65?'#e63946':'rgba(255,255,255,.82)';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(cx-sz-gap,cy); ctx.lineTo(cx-gap,cy);
+  ctx.moveTo(cx+gap,cy);    ctx.lineTo(cx+sz+gap,cy);
+  ctx.moveTo(cx,cy-sz-gap); ctx.lineTo(cx,cy-gap);
+  ctx.moveTo(cx,cy+gap);    ctx.lineTo(cx,cy+sz+gap);
+  ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.55)';
+  ctx.beginPath(); ctx.arc(cx,cy,1.5,0,Math.PI*2); ctx.fill();
+}
+
+// ─── HUD ───────────────────────────────────────────────────────────────────
+function drawHUD(){
+  // — hurt vignette
+  if(hurtFlash>0){
+    ctx.fillStyle=`rgba(200,0,0,${hurtFlash/20*0.38})`;
+    ctx.fillRect(0,0,W,H); hurtFlash--;
+  }
+
+  // — bottom-left stats
+  const bx=18, by=H-48;
+  ctx.fillStyle='rgba(0,0,0,.52)';
+  ctx.fillRect(bx-6,by-22,580,42);
+  ctx.fillStyle='#fff'; ctx.font='bold 12px monospace';
+  ctx.fillText(`HP: ${hp|0}`,       bx,      by-6);
+  ctx.fillText(`SCORE: ${score}`,   bx+90,   by-6);
+  ctx.fillText(`AMMO: ${ammo}`,     bx+220,  by-6);
+  const alive=enemies.filter(e=>!e.dead).length;
+  ctx.fillText(`ENEMIES: ${alive}`, bx+330,  by-6);
+
+  // HP bar
+  const bw=160, bh=10;
+  ctx.fillStyle='#4a0000'; ctx.fillRect(bx,by,bw,bh);
+  ctx.fillStyle=hp>50?'#22c55e':hp>25?'#facc15':'#e63946';
+  ctx.fillRect(bx,by,bw*(hp/100),bh);
+  ctx.strokeStyle='rgba(255,255,255,.18)'; ctx.lineWidth=1; ctx.strokeRect(bx,by,bw,bh);
+
+  // — tremor meter (bottom centre)
+  const tw=150, th=9;
+  const tx=(W/2-tw/2)|0, ty=H-22;
+  ctx.fillStyle='rgba(0,0,0,.52)'; ctx.fillRect(tx-4,ty-14,tw+8,th+18);
+  ctx.fillStyle='#300'; ctx.fillRect(tx,ty,tw,th);
+  const tc=tremorScore<30?'#22c55e':tremorScore<65?'#facc15':'#e63946';
+  ctx.fillStyle=tc; ctx.fillRect(tx,ty,tw*(tremorScore/100),th);
+  ctx.strokeStyle='rgba(255,255,255,.15)'; ctx.strokeRect(tx,ty,tw,th);
+  ctx.fillStyle='rgba(255,255,255,.6)'; ctx.font='9px monospace';
+  ctx.textAlign='center';
+  ctx.fillText(`TREMOR ${tremorScore.toFixed(0)}`, tx+tw/2, ty+th+10);
+  ctx.textAlign='left';
+
+  drawMinimap();
+}
+
+function drawMinimap(){
+  const ms=5, mx=W-MAP_W*ms-10, my=10;
+  ctx.fillStyle='rgba(0,0,0,.48)';
+  ctx.fillRect(mx-2,my-2,MAP_W*ms+4,MAP_H*ms+4);
+  for(let r=0;r<MAP_H;r++) for(let c=0;c<MAP_W;c++){
+    ctx.fillStyle=RAW_MAP[r][c]>0?'#777':'#111';
+    ctx.fillRect(mx+c*ms, my+r*ms, ms-1, ms-1);
+  }
+  // player
+  ctx.fillStyle='#e63946';
+  ctx.beginPath(); ctx.arc(mx+px*ms, my+py*ms, 3,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#e63946'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(mx+px*ms, my+py*ms);
+  ctx.lineTo(mx+(px+Math.cos(pa)*1.8)*ms, my+(py+Math.sin(pa)*1.8)*ms);
+  ctx.stroke();
+  // enemies
+  ctx.fillStyle='#facc15';
+  enemies.forEach(e=>{
+    if(!e.dead){ctx.beginPath();ctx.arc(mx+e.x*ms,my+e.y*ms,2,0,Math.PI*2);ctx.fill();}
+  });
+}
+
+// ─── GAME OVER / WIN ───────────────────────────────────────────────────────
+function drawEndScreen(){
+  ctx.fillStyle='rgba(0,0,0,.72)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.fillStyle=gameWon?'#22c55e':'#e63946';
+  ctx.font=`900 58px system-ui,sans-serif`;
+  ctx.fillText(gameWon?'MISSION CLEAR':'GAME OVER', W/2, H/2-36);
+  ctx.fillStyle='#fff'; ctx.font='22px monospace';
+  ctx.fillText('Score: '+score, W/2, H/2+12);
+  ctx.font='14px system-ui'; ctx.fillStyle='rgba(255,255,255,.5)';
+  ctx.fillText('Click to restart', W/2, H/2+50);
+  ctx.textAlign='left';
+}
+
+// ─── SHOOTING ──────────────────────────────────────────────────────────────
+function shoot(){
+  if(gameOver||ammo<=0||shootCd>0) return;
+  ammo--; shootCd=14; shotFlash=9;
+  const spread=(tremorScore/100)*0.3;
+  const aimA=pa+(Math.random()-.5)*spread;
+  const rdx=Math.cos(aimA), rdy=Math.sin(aimA);
+  let rx=px, ry=py;
+  for(let s=0;s<MAX_D*20;s++){
+    rx+=rdx*.05; ry+=rdy*.05;
+    if(tileAt(rx,ry)>0) break;
+    for(const e of enemies){
+      if(!e.dead && d2(rx,ry,e.x,e.y)<0.38){
+        e.hp--;
+        if(e.hp<=0){e.dead=true; score+=100+(10*(100-tremorScore|0)|0);}
+        return;
+      }
+    }
+  }
+}
+
+// ─── RESTART ───────────────────────────────────────────────────────────────
+function restartGame(){
+  px=1.5;py=1.5;pa=0.3;hp=100;score=0;ammo=40;
+  gameOver=false;gameWon=false;hurtFlash=0;shotFlash=0;shootCd=0;
+  enemies=SPAWN.map(([x,y])=>({x,y,hp:3,dead:false}));
+}
+
+// ─── UPDATE ────────────────────────────────────────────────────────────────
+let prevTs=0;
+function update(ts){
+  const dt=Math.min(50,ts-prevTs); prevTs=ts;
+  if(gameOver) return;
+
+  // Rotate
+  pa += mdx*ROT_SPD; mdx=0;
+  if(keys['ArrowLeft'])  pa-=ROT_SPD*18;
+  if(keys['ArrowRight']) pa+=ROT_SPD*18;
+
+  // Move
+  const spd=MOV_SPD*dt/16;
+  let dx=0,dy=0;
+  if(keys['KeyW']||keys['ArrowUp'])  {dx+=Math.cos(pa)*spd;dy+=Math.sin(pa)*spd;}
+  if(keys['KeyS']||keys['ArrowDown']){dx-=Math.cos(pa)*spd;dy-=Math.sin(pa)*spd;}
+  if(keys['KeyA']){dx+=Math.cos(pa-Math.PI/2)*spd;dy+=Math.sin(pa-Math.PI/2)*spd;}
+  if(keys['KeyD']){dx+=Math.cos(pa+Math.PI/2)*spd;dy+=Math.sin(pa+Math.PI/2)*spd;}
+  if(canWalk(px+dx,py)) px+=dx;
+  if(canWalk(px,py+dy)) py+=dy;
+
+  // Shoot key
+  if((keys['Space']||keys['KeyF'])&&shootCd<=0){shoot();keys['Space']=false;keys['KeyF']=false;}
+  if(shootCd>0) shootCd--;
+
+  // Enemies
+  for(const e of enemies){
+    if(e.dead) continue;
+    const dist=d2(px,py,e.x,e.y);
+    if(dist<0.58){hp-=0.28*dt/16;hurtFlash=14;if(hp<=0){hp=0;gameOver=true;return;}}
+    if(dist>0.58&&dist<10){
+      const nx=e.x+(px-e.x)/dist*E_SPD*dt/16;
+      const ny=e.y+(py-e.y)/dist*E_SPD*dt/16;
+      if(tileAt(nx,ny)===0){e.x=nx;e.y=ny;}
+    }
+  }
+
+  // Win
+  if(enemies.every(e=>e.dead)){gameOver=true;gameWon=true;}
+
+  pollTremor();
+}
+
+// ─── MAIN LOOP ─────────────────────────────────────────────────────────────
+function frame(ts){
+  update(ts);
+  castRays();
+  drawEnemies();
+  drawWeapon();
+  drawCrosshair();
+  drawHUD();
+  if(gameOver) drawEndScreen();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

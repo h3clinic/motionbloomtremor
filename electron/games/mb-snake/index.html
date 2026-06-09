@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Snake · Tremor Trail</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a1208;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column}
+canvas{border-radius:8px;border:1.5px solid rgba(255,255,255,.08)}
+#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:20px;background:rgba(0,0,0,.65);padding:7px 20px;border-radius:20px;color:#fff;font:700 13px system-ui;white-space:nowrap;z-index:5}
+#msg{position:fixed;inset:0;background:rgba(0,0,0,.87);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 38px/1 system-ui;color:#22c55e;margin-bottom:10px}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+.k{background:rgba(255,255,255,.12);border-radius:4px;padding:1px 7px;font:700 12px monospace}
+button{margin-top:18px;background:#22c55e;color:#fff;border:none;padding:11px 30px;border-radius:11px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:12px;font:700 16px system-ui;color:#facc15;min-height:22px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span>Score <b id="score">0</b></span>
+  <span>Length <b id="len">3</b></span>
+  <span>Best <b id="hi">0</b></span>
+  <span>Tremor <b id="trm">—</b></span>
+</div>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h1>🐍 MB Snake</h1>
+  <p class="sub">Tremor Trail · higher tremor = more random direction drift!</p>
+  <p class="sub" style="margin-top:8px">
+    <span class="k">↑ ↓ ← →</span>&nbsp; or &nbsp;<span class="k">W A S D</span>&nbsp; to steer
+  </p>
+  <button id="startBtn">Play</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const COLS=28,ROWS=22,CS=24;
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+cv.width=COLS*CS; cv.height=ROWS*CS;
+
+let snake,dir,ndir,food,score,hi=0,running,tid;
+let ts=0,tf=5;
+
+function poll(){
+  if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore;
+  if(typeof window._mbTremorFreq==='number')  tf=Math.max(1,window._mbTremorFreq);
+  document.getElementById('trm').textContent=Math.round(ts)+'%';
+}
+
+function place(){
+  let p;
+  do{ p={x:(Math.random()*COLS)|0,y:(Math.random()*ROWS)|0}; }
+  while(snake.some(s=>s.x===p.x&&s.y===p.y));
+  food=p;
+}
+
+function start(){
+  snake=[{x:14,y:11},{x:13,y:11},{x:12,y:11}];
+  dir={x:1,y:0}; ndir={x:1,y:0};
+  score=0; running=true;
+  place();
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  if(tid) clearInterval(tid);
+  tid=setInterval(tick,110);
+}
+
+function tick(){
+  poll();
+  let d={...ndir};
+  // Tremor drift: random perpendicular nudge proportional to tremor score
+  if(Math.random()<ts/2500){
+    d=d.x!==0
+      ?(Math.random()<.5?{x:0,y:1}:{x:0,y:-1})
+      :(Math.random()<.5?{x:1,y:0}:{x:-1,y:0});
+  }
+  dir=d;
+  const h={x:(snake[0].x+dir.x+COLS)%COLS, y:(snake[0].y+dir.y+ROWS)%ROWS};
+  if(snake.some(s=>s.x===h.x&&s.y===h.y)) return end('💀 Crashed!');
+  snake.unshift(h);
+  if(h.x===food.x&&h.y===food.y){
+    score+=10+Math.round(ts/10); place();
+  } else snake.pop();
+  document.getElementById('score').textContent=score;
+  document.getElementById('len').textContent=snake.length;
+  if(score>hi){ hi=score; document.getElementById('hi').textContent=hi; }
+  draw();
+}
+
+function end(msg){
+  clearInterval(tid); running=false;
+  document.getElementById('msg').classList.remove('gone');
+  document.getElementById('result').textContent=msg+' Score: '+score;
+  document.getElementById('startBtn').textContent='Play Again';
+}
+
+function draw(){
+  ctx.fillStyle='#0a1208'; ctx.fillRect(0,0,cv.width,cv.height);
+  // Grid dots
+  ctx.fillStyle='rgba(255,255,255,.04)';
+  for(let x=0;x<COLS;x++) for(let y=0;y<ROWS;y++){
+    ctx.fillRect(x*CS+CS/2-1,y*CS+CS/2-1,2,2);
+  }
+  // Food pulse
+  const pulse=0.88+0.12*Math.sin(Date.now()*.006);
+  const fr=(CS/2-2)*pulse;
+  ctx.fillStyle='#ef4444';
+  ctx.beginPath();
+  ctx.arc(food.x*CS+CS/2,food.y*CS+CS/2,fr,0,Math.PI*2);
+  ctx.fill();
+  // Snake body
+  snake.forEach((s,i)=>{
+    const t=i/snake.length;
+    ctx.fillStyle=`hsl(${135-t*30},${75-t*15}%,${45-t*12}%)`;
+    ctx.fillRect(s.x*CS+1,s.y*CS+1,CS-2,CS-2);
+    if(i===0){
+      ctx.fillStyle='#fff';
+      const ex=s.x*CS+CS/2+dir.x*4,ey=s.y*CS+CS/2+dir.y*4;
+      ctx.beginPath();ctx.arc(ex+dir.y*3,ey+dir.x*3,2.5,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(ex-dir.y*3,ey-dir.x*3,2.5,0,Math.PI*2);ctx.fill();
+    }
+  });
+}
+
+document.addEventListener('keydown',e=>{
+  const m={ArrowUp:{x:0,y:-1},ArrowDown:{x:0,y:1},ArrowLeft:{x:-1,y:0},ArrowRight:{x:1,y:0},
+           KeyW:{x:0,y:-1},KeyS:{x:0,y:1},KeyA:{x:-1,y:0},KeyD:{x:1,y:0}};
+  const nd=m[e.code];
+  if(nd&&!(nd.x===-dir.x&&nd.y===-dir.y)) ndir=nd;
+  e.preventDefault();
+});
+document.getElementById('startBtn').addEventListener('click',start);
+ctx.fillStyle='#0a1208'; ctx.fillRect(0,0,cv.width,cv.height);
+</script>
+</body>
+</html>

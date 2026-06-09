@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Breakout</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0a0a14;overflow:hidden;display:flex;align-items:center;justify-content:center}
+canvas{display:block}
+#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:24px;
+     background:rgba(255,255,255,.07);backdrop-filter:blur(8px);padding:7px 22px;
+     border-radius:20px;color:#fff;font:700 13px system-ui;z-index:5;white-space:nowrap;
+     border:1px solid rgba(255,255,255,.1)}
+#msg{position:fixed;inset:0;background:rgba(0,0,10,.9);display:flex;flex-direction:column;
+     align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 40px/1 system-ui;letter-spacing:.03em;margin-bottom:12px;color:#3b82f6}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+button{margin-top:20px;background:#3b82f6;color:#fff;border:none;padding:12px 32px;
+       border-radius:12px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:14px;font:700 16px system-ui;color:#facc15;min-height:22px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span>Score <b id="score">0</b></span>
+  <span>Lives <b id="lives">3</b></span>
+  <span>Level <b id="level">1</b></span>
+  <span>Tremor <b id="trm">--</b></span>
+</div>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h1>MB Breakout</h1>
+  <p class="sub">Wall Breaker — stay calm, your tremor wobbles the paddle.</p>
+  <p class="sub" style="margin-top:8px">Move the mouse (or use A/D keys) to steer the paddle.</p>
+  <button id="startBtn">Serve</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+const CW=480,CH=640;
+cv.width=CW; cv.height=CH;
+
+const COLS=10,ROWS=8,BPAD=4;
+const BW=(CW-BPAD*(COLS+1))/COLS;
+const BH=18;
+const BTOP=60;
+const BRICK_COLORS=['#1d4ed8','#2563eb','#3b82f6','#60a5fa','#93c5fd','#bfdbfe','#e63946','#dc2626'];
+
+let score,lives,level,running,ball,paddle,bricks,ts=0,mx=CW/2;
+
+function poll(){
+  if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore;
+  document.getElementById('trm').textContent=Math.round(ts)+'%';
+}
+
+document.addEventListener('mousemove',e=>{
+  const rect=cv.getBoundingClientRect();
+  mx=((e.clientX-rect.left)/(rect.right-rect.left))*CW;
+});
+const keys={};
+document.addEventListener('keydown',e=>{keys[e.code]=true;e.preventDefault();});
+document.addEventListener('keyup',  e=>{keys[e.code]=false;});
+cv.addEventListener('click',()=>{ if(!running) start(); else if(ball.held) launch(); });
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+
+function makeBricks(){
+  bricks=[];
+  for(let r=0;r<ROWS;r++) for(let c=0;c<COLS;c++){
+    bricks.push({
+      x:BPAD+c*(BW+BPAD), y:BTOP+r*(BH+BPAD),
+      w:BW, h:BH,
+      hp: r<2?2:1,
+      color:BRICK_COLORS[r]
+    });
+  }
+}
+
+function makeBall(){
+  return {
+    x:CW/2, y:CH-80,
+    vx:(Math.random()-.5)*4,
+    vy:-(4+level*0.3),
+    r:8, held:true
+  };
+}
+
+function start(){
+  score=0; lives=3; level=1; running=true;
+  paddle={x:CW/2,w:78,h:12,y:CH-30};
+  ball=makeBall(); makeBricks();
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  requestAnimationFrame(frame);
+}
+
+let last=0;
+function frame(ts_){
+  if(!running) return;
+  const dt=Math.min(ts_-last,33); last=ts_;
+  poll();
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function launch(){
+  if(!ball.held) return;
+  ball.held=false;
+  ball.vx=(Math.random()-.5)*5;
+  ball.vy=-(5+level*0.35);
+}
+
+function update(dt){
+  const spd=dt/16.667;
+  // Paddle movement
+  if(keys['KeyA']||keys['ArrowLeft']) mx=Math.max(paddle.w/2,mx-8*spd);
+  if(keys['KeyD']||keys['ArrowRight']) mx=Math.min(CW-paddle.w/2,mx+8*spd);
+  // Tremor wobble
+  const jitter=(Math.random()-.5)*ts*0.12*spd;
+  paddle.x=Math.max(paddle.w/2,Math.min(CW-paddle.w/2,mx+jitter));
+
+  if(ball.held){ ball.x=paddle.x; return; }
+  if(keys['Space']) launch();
+
+  ball.x+=ball.vx*spd; ball.y+=ball.vy*spd;
+
+  // Wall bounces
+  if(ball.x-ball.r<0){ ball.x=ball.r; ball.vx=Math.abs(ball.vx); }
+  if(ball.x+ball.r>CW){ ball.x=CW-ball.r; ball.vx=-Math.abs(ball.vx); }
+  if(ball.y-ball.r<0){ ball.y=ball.r; ball.vy=Math.abs(ball.vy); }
+
+  // Paddle bounce
+  if(ball.vy>0&&ball.y+ball.r>=paddle.y&&ball.y+ball.r<=paddle.y+paddle.h&&
+     ball.x>=paddle.x-paddle.w/2&&ball.x<=paddle.x+paddle.w/2){
+    const dx=(ball.x-paddle.x)/(paddle.w/2);
+    ball.vx=dx*6;
+    ball.vy=-Math.abs(ball.vy)*1.02;
+    ball.y=paddle.y-ball.r;
+    // Clamp speed
+    const spd2=Math.hypot(ball.vx,ball.vy);
+    const max=12;
+    if(spd2>max){ball.vx=ball.vx/spd2*max;ball.vy=ball.vy/spd2*max;}
+  }
+
+  // Brick collisions
+  for(let i=bricks.length-1;i>=0;i--){
+    const b=bricks[i];
+    if(ball.x+ball.r>b.x&&ball.x-ball.r<b.x+b.w&&
+       ball.y+ball.r>b.y&&ball.y-ball.r<b.y+b.h){
+      // Find axis of least penetration
+      const ox=Math.min(ball.x+ball.r-b.x,b.x+b.w-(ball.x-ball.r));
+      const oy=Math.min(ball.y+ball.r-b.y,b.y+b.h-(ball.y-ball.r));
+      if(ox<oy) ball.vx=-ball.vx; else ball.vy=-ball.vy;
+      b.hp--;
+      if(b.hp<=0){ score+=10*(ROWS-Math.floor((b.y-BTOP)/(BH+BPAD))); bricks.splice(i,1); }
+      break;
+    }
+  }
+
+  // Lost ball
+  if(ball.y-ball.r>CH){
+    lives--;
+    if(lives<=0){ running=false; endGame(); return; }
+    ball=makeBall(); ball.x=paddle.x;
+  }
+
+  // Level clear
+  if(bricks.length===0){ level++; makeBricks(); ball=makeBall(); ball.x=paddle.x; }
+
+  document.getElementById('score').textContent=score;
+  document.getElementById('lives').textContent=lives;
+  document.getElementById('level').textContent=level;
+}
+
+function draw(){
+  ctx.fillStyle='#0a0a14'; ctx.fillRect(0,0,CW,CH);
+
+  // Bricks
+  bricks.forEach(b=>{
+    const alpha=b.hp>1?1:0.75;
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=b.color;
+    ctx.fillRect(b.x,b.y,b.w,b.h);
+    ctx.fillStyle='rgba(255,255,255,.15)';
+    ctx.fillRect(b.x,b.y,b.w,3);
+    ctx.globalAlpha=1;
+  });
+
+  // Paddle
+  const pgr=ctx.createLinearGradient(paddle.x-paddle.w/2,0,paddle.x+paddle.w/2,0);
+  pgr.addColorStop(0,'#1d4ed8'); pgr.addColorStop(1,'#3b82f6');
+  ctx.fillStyle=pgr;
+  ctx.beginPath();
+  ctx.roundRect(paddle.x-paddle.w/2,paddle.y,paddle.w,paddle.h,5);
+  ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';
+  ctx.fillRect(paddle.x-paddle.w/2+4,paddle.y+2,paddle.w-8,3);
+
+  // Ball
+  const bgr=ctx.createRadialGradient(ball.x-2,ball.y-2,1,ball.x,ball.y,ball.r);
+  bgr.addColorStop(0,'#fff'); bgr.addColorStop(1,'#a5b4fc');
+  ctx.fillStyle=bgr;
+  ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.fill();
+  if(ball.held){
+    ctx.strokeStyle='rgba(255,255,255,.3)'; ctx.lineWidth=1;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(ball.x,ball.y+ball.r); ctx.lineTo(ball.x,ball.y+28); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,255,255,.45)'; ctx.font='11px system-ui'; ctx.textAlign='center';
+    ctx.fillText('click to serve',ball.x,ball.y+42);
+  }
+
+  // Bottom danger zone
+  ctx.fillStyle='rgba(230,57,70,.06)';
+  ctx.fillRect(0,paddle.y+paddle.h+2,CW,CH-paddle.y-paddle.h);
+}
+
+function endGame(){
+  document.getElementById('msg').classList.remove('gone');
+  document.getElementById('result').textContent='Game over — score: '+score+'  level: '+level;
+  document.getElementById('startBtn').textContent='Play Again';
+}
+
+document.getElementById('startBtn').addEventListener('click',start);
+draw();
+</script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+{
+  "version": "2.0",
+  "count": 5,
+  "fps": 30,
+  "duration": 1.0,
+  "seed": 123,
+  "max_retries": 3,
+  "asset": "/Users/aharshi/MotionBloomAppVersion/motionbloomtremor/handharness/input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb",
+  "skin_tones": [
+    "very_light",
+    "light",
+    "light_warm",
+    "medium_light",
+    "medium",
+    "medium_warm",
+    "tan",
+    "brown",
+    "dark_brown",
+    "deep_brown",
+    "cool_dark",
+    "warm_dark"
+  ],
+  "pose_families": [
+    "rest_open",
+    "relaxed",
+    "fist",
+    "partial_fist",
+    "pinch",
+    "pointing",
+    "finger_spread",
+    "palm_up",
+    "palm_down",
+    "wrist_flexion",
+    "wrist_extension",
+    "reach_forward",
+    "reach_sideways",
+    "grip_release",
+    "finger_tap_index",
+    "finger_tap_middle"
+  ],
+  "tremor_profiles": [
+    "no_tremor",
+    "mild_postural",
+    "moderate_postural",
+    "severe_postural",
+    "kinetic_tremor",
+    "wrist_dominant",
+    "finger_dominant",
+    "mixed_wrist_finger",
+    "gross_motion_no_tremor",
+    "tracking_artifact_sim"
+  ],
+  "severity_distribution": {
+    "none": 0.2,
+    "mild": 0.25,
+    "moderate": 0.25,
+    "severe": 0.2,
+    "artifact": 0.05,
+    "gross_motion": 0.05
+  },
+  "camera_distribution": {
+    "front": 0.25,
+    "oblique": 0.35,
+    "side": 0.2,
+    "top": 0.1,
+    "closeup": 0.1
+  },
+  "motion_distribution": {
+    "stationary": 0.35,
+    "slow_translation": 0.25,
+    "reach": 0.2,
+    "wrist_rotation": 0.1,
+    "finger_task": 0.1
+  },
+  "severity_formula": "score = round(100 * clamp(amp/12, 0,1) * freq_weight * affected_weight)"
+}

@@ -465,6 +465,116 @@ def generate_smoke_configs(count: int, seed: int, fps: int, duration: float) -> 
     return configs
 
 
+# ─── Mini50 Mode Settings ────────────────────────────────────────────────────
+
+MINI50_CAMERAS = [
+    {"name": "front_high",    "azim": 0,   "elev": 20},
+    {"name": "front_above",   "azim": 0,   "elev": 30},
+    {"name": "oblique_l",     "azim": 20,  "elev": 20},
+    {"name": "oblique_r",     "azim": -20, "elev": 20},
+    {"name": "oblique_high",  "azim": 15,  "elev": 28},
+    {"name": "mild_side_l",   "azim": 40,  "elev": 18},
+    {"name": "mild_side_r",   "azim": -40, "elev": 18},
+]
+
+MINI50_POSES = [
+    "rest_open", "relaxed", "finger_spread", "pinch",
+    "palm_down", "grip_release", "reach_forward", "finger_tap_index",
+]
+
+MINI50_MOTIONS = ["stationary", "slow_translation_x", "slow_translation_y", "wrist_rotation"]
+
+
+def generate_mini50_configs(count: int, seed: int, fps: int, duration: float) -> List[Dict]:
+    """Generate intermediate-difficulty configs for mini50 validation.
+
+    Wider than smoke but not full-hard:
+    - All 12 skin tones (detectability-rejected post-hoc)
+    - 8 pose families (no full fist / extreme occlusion)
+    - Front + mild oblique cameras (elevation ≥18°)
+    - Stationary + slow translation + mild wrist rotation
+    - 8 tremor profiles (no tracking_artifact_sim)
+    """
+    rng = random.Random(seed)
+
+    severity_to_profiles = {
+        "none": ["no_tremor", "gross_motion_no_tremor"],
+        "mild": ["mild_postural", "finger_dominant"],
+        "moderate": ["moderate_postural", "wrist_dominant", "mixed_wrist_finger"],
+        "severe": ["severe_postural"],
+    }
+
+    # Exclude extreme skin tones proven undetectable by MediaPipe
+    MINI50_EXCLUDED_SKINS = {"deep_brown", "very_light"}
+    mini50_skin_tones = [k for k in SKIN_TONES.keys() if k not in MINI50_EXCLUDED_SKINS]
+    configs = []
+
+    for i in range(count):
+        severity_class = list(severity_to_profiles.keys())[i % len(severity_to_profiles)]
+        profiles = severity_to_profiles[severity_class]
+        tremor_profile_name = rng.choice(profiles)
+        profile = TREMOR_PROFILES[tremor_profile_name]
+
+        if profile["freq_range"][1] == 0:
+            freq, amp = 0.0, 0.0
+        else:
+            freq = rng.uniform(*profile["freq_range"])
+            amp = rng.uniform(*profile["amp_range"])
+
+        # Affected joints
+        if tremor_profile_name == "wrist_dominant":
+            affected_type = "wrist_only"
+        elif tremor_profile_name == "finger_dominant":
+            affected_type = rng.choice(["one_finger", "multiple_fingers"])
+        elif tremor_profile_name == "mixed_wrist_finger":
+            affected_type = "wrist_plus_fingers"
+        elif tremor_profile_name in ("no_tremor", "gross_motion_no_tremor"):
+            affected_type = "wrist_only"
+        else:
+            affected_type = rng.choice(list(AFFECTED_JOINT_SETS.keys()))
+
+        severity_score = compute_severity_score(amp, freq, affected_type)
+
+        camera = rng.choice(MINI50_CAMERAS)
+        pose_family = rng.choice(MINI50_POSES)
+        motion_type = rng.choice(MINI50_MOTIONS)
+        skin_tone = rng.choice(mini50_skin_tones)
+
+        base_pose = POSE_FAMILIES[pose_family]
+        pose_rotations = {}
+        for bone, (rx, ry, rz) in base_pose.items():
+            # Reduced jitter vs full mode (1.5° vs 2.5°) to prevent
+            # random noise pushing borderline poses into undetectable range
+            pose_rotations[bone] = (
+                round(rx + rng.gauss(0, 1.5), 2),
+                round(ry + rng.gauss(0, 0.8), 2),
+                round(rz + rng.gauss(0, 1.2), 2),
+            )
+
+        render_seed = rng.randint(0, 2**31)
+
+        configs.append({
+            "pose_family": pose_family,
+            "pose_rotations": pose_rotations,
+            "skin_tone_id": skin_tone,
+            "tremor_profile": tremor_profile_name,
+            "tremor_type": profile["label"],
+            "frequency_hz": round(freq, 2),
+            "amplitude_degrees": round(amp, 2),
+            "affected_joint_type": affected_type,
+            "affected_joints": AFFECTED_JOINT_SETS[affected_type],
+            "severity_score": severity_score,
+            "camera": camera,
+            "motion_type": motion_type,
+            "duration": duration,
+            "fps": fps,
+            "render_seed": render_seed,
+        })
+
+    rng.shuffle(configs)
+    return configs
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # BLENDER RENDER SCRIPT (embedded)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -662,11 +772,34 @@ def set_skin_material(tone_data):
     links.new(mix_rgb.outputs[2], bsdf.inputs["Base Color"])
     
     bsdf.inputs["Roughness"].default_value = tone_data["roughness"]
-    bsdf.inputs["Specular IOR Level"].default_value = 0.3
-    # Stronger subsurface for realistic skin translucency
-    bsdf.inputs["Subsurface Weight"].default_value = 0.35
+    # Adaptive material properties based on skin luminance
+    # Dark tones need more specular highlight to look skin-like to detector
+    skin_luminance = tone_data["base"][0] * 0.3 + tone_data["base"][1] * 0.6 + tone_data["base"][2] * 0.1
+    if skin_luminance < 0.35:  # Dark tones
+        bsdf.inputs["Specular IOR Level"].default_value = 0.5
+        bsdf.inputs["Subsurface Weight"].default_value = 0.2
+    elif skin_luminance > 0.8:  # Very light tones
+        bsdf.inputs["Specular IOR Level"].default_value = 0.2
+        bsdf.inputs["Subsurface Weight"].default_value = 0.5
+    else:  # Medium tones
+        bsdf.inputs["Specular IOR Level"].default_value = 0.3
+        bsdf.inputs["Subsurface Weight"].default_value = 0.35
     bsdf.inputs["Subsurface Radius"].default_value = tone_data["subsurface"]
     bsdf.inputs["Subsurface Scale"].default_value = 0.1
+    
+    # Adaptive background: ensure contrast with skin tone
+    # Darker bg for lighter skin, lighter bg for darker skin
+    if skin_luminance < 0.4:
+        bg_val = (0.55, 0.56, 0.57, 1.0)  # Lighter bg for dark skin
+    elif skin_luminance > 0.75:
+        bg_val = (0.30, 0.32, 0.34, 1.0)  # Darker bg for light skin
+    else:
+        bg_val = (0.42, 0.44, 0.46, 1.0)  # Default gray
+    world = bpy.context.scene.world
+    if world and world.node_tree:
+        bg_node = world.node_tree.nodes.get("Background")
+        if bg_node:
+            bg_node.inputs["Color"].default_value = bg_val
     
     links.new(bsdf.outputs["BSDF"], output_node.inputs["Surface"])
     mesh_obj.data.materials.append(mat)
@@ -738,10 +871,10 @@ for vi, vid_cfg in enumerate(videos_config):
                     tremor_val = compute_tremor_rotation(frame, freq, amp, phase, fps)
                     base_rot[tremor_axis] += tremor_val
 
-                # Add macro motion (wrist rotation)
+                # Add macro motion (wrist rotation) - limited to ±8° to keep hand in detectable range
                 if bone_name == "radius_ulna" and motion_type == "wrist_rotation":
                     t = frame / fps
-                    base_rot[1] += 15.0 * math.sin(0.6 * math.pi * t)
+                    base_rot[1] += 8.0 * math.sin(0.6 * math.pi * t)
 
                 pbone.rotation_euler = (
                     math.radians(base_rot[0]),
@@ -872,7 +1005,12 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries for failed renders")
     parser.add_argument("--smoke", action="store_true", help="Smoke mode: restrict to detector-friendly settings only")
+    parser.add_argument("--mini50", action="store_true", help="Mini50 mode: intermediate difficulty for validation")
     args = parser.parse_args()
+
+    if args.smoke and args.mini50:
+        print("ERROR: --smoke and --mini50 are mutually exclusive")
+        sys.exit(1)
 
     asset = Path(args.asset).resolve()
     rig_map = Path(args.rig_map).resolve()
@@ -901,6 +1039,9 @@ def main():
     if args.smoke:
         print("Generating SMOKE MODE configs (detector-friendly only)...")
         configs = generate_smoke_configs(args.count, args.seed, args.fps, args.duration)
+    elif args.mini50:
+        print("Generating MINI50 MODE configs (intermediate difficulty)...")
+        configs = generate_mini50_configs(args.count, args.seed, args.fps, args.duration)
     else:
         print("Generating balanced sample configurations...")
         configs = generate_balanced_configs(args.count, args.seed, args.fps, args.duration)

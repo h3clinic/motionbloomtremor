@@ -1,0 +1,40 @@
+{
+  "total_videos": 5,
+  "processed_videos": 5,
+  "total_frames": 150,
+  "total_detected_frames": 150,
+  "overall_detection_rate": 1.0,
+  "elapsed_seconds": 1.1,
+  "per_video": [
+    {
+      "video_id": "MB_SYNTH_000001",
+      "total_frames": 30,
+      "detected_frames": 30,
+      "detection_rate": 1.0
+    },
+    {
+      "video_id": "MB_SYNTH_000002",
+      "total_frames": 30,
+      "detected_frames": 30,
+      "detection_rate": 1.0
+    },
+    {
+      "video_id": "MB_SYNTH_000003",
+      "total_frames": 30,
+      "detected_frames": 30,
+      "detection_rate": 1.0
+    },
+    {
+      "video_id": "MB_SYNTH_000004",
+      "total_frames": 30,
+      "detected_frames": 30,
+      "detection_rate": 1.0
+    },
+    {
+      "video_id": "MB_SYNTH_000005",
+      "total_frames": 30,
+      "detected_frames": 30,
+      "detection_rate": 1.0
+    }
+  ]
+}

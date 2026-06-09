@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MB Targets · Steady Aim</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;background:#0d1117;overflow:hidden}
+canvas{display:block;cursor:crosshair}
+#ui{position:fixed;top:14px;left:50%;transform:translateX(-50%);display:flex;gap:20px;background:rgba(0,0,0,.7);padding:8px 20px;border-radius:20px;color:#fff;font:700 13px system-ui;white-space:nowrap;z-index:5}
+#msg{position:fixed;inset:0;background:rgba(0,0,0,.87);display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;text-align:center;z-index:10}
+#msg.gone{display:none}
+h1{font:900 38px/1 system-ui;color:#f59e0b;margin-bottom:10px}
+.sub{font:14px/1.8 system-ui;color:rgba(255,255,255,.55)}
+button{margin-top:18px;background:#f59e0b;color:#000;border:none;padding:11px 30px;border-radius:11px;font:700 15px system-ui;cursor:pointer}
+#result{margin-top:12px;font:700 16px system-ui;color:#facc15;min-height:22px}
+</style>
+</head>
+<body>
+<div id="ui">
+  <span>Score <b id="score">0</b></span>
+  <span>Hits <b id="hits">0</b></span>
+  <span>Time <b id="time">30</b>s</span>
+  <span>Tremor <b id="trm">—</b></span>
+</div>
+<canvas id="c"></canvas>
+<div id="msg">
+  <h1>🎯 MB Targets</h1>
+  <p class="sub">Steady Aim · higher tremor = smaller & faster targets!</p>
+  <p class="sub" style="margin-top:8px">Click targets before they vanish · 30 seconds</p>
+  <button id="startBtn">Start Round</button>
+  <p id="result"></p>
+</div>
+<script>
+'use strict';
+const cv=document.getElementById('c');
+const ctx=cv.getContext('2d');
+let W,H;
+function resize(){ W=cv.width=window.innerWidth|0; H=cv.height=window.innerHeight|0; }
+resize(); window.addEventListener('resize',resize);
+
+let targets=[],score=0,hits=0,timeLeft=30,running=false;
+let cdId,mx=0,my=0;
+let ts=0,tf=5;
+let spawnAcc=0,lastT=0;
+
+function poll(){
+  if(typeof window._mbTremorScore==='number') ts=window._mbTremorScore;
+  if(typeof window._mbTremorFreq==='number')  tf=Math.max(1,window._mbTremorFreq);
+  document.getElementById('trm').textContent=Math.round(ts)+'%';
+}
+
+function startGame(){
+  targets=[]; score=0; hits=0; timeLeft=30; spawnAcc=0;
+  document.getElementById('msg').classList.add('gone');
+  document.getElementById('result').textContent='';
+  running=true;
+  if(cdId) clearInterval(cdId);
+  cdId=setInterval(()=>{
+    timeLeft--; document.getElementById('time').textContent=timeLeft;
+    if(timeLeft<=0){ clearInterval(cdId); endGame(); }
+  },1000);
+  lastT=performance.now();
+  requestAnimationFrame(frame);
+}
+
+function spawn(){
+  const mg=80;
+  const minR=Math.max(10,36-ts*0.22); // shrinks with tremor
+  const r=minR+Math.random()*10;
+  const life=Math.max(400,900-ts*3.5);
+  targets.push({
+    x:mg+Math.random()*(W-mg*2), y:mg+Math.random()*(H-mg*2),
+    r, life, born:performance.now(),
+    hue: Math.random()*60+10
+  });
+}
+
+function frame(ts_){
+  if(!running) return;
+  poll();
+  const dt=ts_-lastT; lastT=ts_;
+  spawnAcc+=dt;
+  const rate=Math.max(250,850-ts*3.5);
+  while(spawnAcc>rate){ spawnAcc-=rate; spawn(); }
+
+  const now=performance.now();
+  targets=targets.filter(t=>(now-t.born)<t.life);
+
+  ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+
+  targets.forEach(t=>{
+    const age=(now-t.born)/t.life;
+    const alpha=age<.2?age/.2:age>.75?(1-age)/.25:1;
+    ctx.globalAlpha=alpha*.28;
+    ctx.strokeStyle=`hsl(${t.hue},85%,55%)`; ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.arc(t.x,t.y,t.r*1.65,0,Math.PI*2);ctx.stroke();
+    ctx.beginPath();ctx.arc(t.x,t.y,t.r*1.25,0,Math.PI*2);ctx.stroke();
+    ctx.globalAlpha=alpha;
+    ctx.fillStyle=`hsl(${t.hue},85%,55%)`;
+    ctx.beginPath();ctx.arc(t.x,t.y,t.r,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle='rgba(0,0,0,.35)';
+    ctx.beginPath();ctx.arc(t.x,t.y,t.r*.42,0,Math.PI*2);ctx.fill();
+    ctx.globalAlpha=1;
+  });
+
+  // Crosshair with tremor jitter
+  const jx=mx+(Math.random()-.5)*ts*.06, jy=my+(Math.random()-.5)*ts*.06;
+  ctx.strokeStyle='rgba(255,255,255,.8)'; ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(jx-14,jy);ctx.lineTo(jx+14,jy);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(jx,jy-14);ctx.lineTo(jx,jy+14);ctx.stroke();
+  ctx.beginPath();ctx.arc(jx,jy,5,0,Math.PI*2);ctx.stroke();
+
+  document.getElementById('score').textContent=score;
+  document.getElementById('hits').textContent=hits;
+  requestAnimationFrame(frame);
+}
+
+function endGame(){
+  running=false;
+  document.getElementById('msg').classList.remove('gone');
+  const total=hits+targets.length;
+  const acc=total?Math.round(hits/total*100):0;
+  document.getElementById('result').textContent=`Score: ${score}  Hits: ${hits}  Accuracy: ${acc}%`;
+  document.getElementById('startBtn').textContent='Play Again';
+  document.getElementById('time').textContent=0;
+}
+
+cv.addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY;});
+cv.addEventListener('click',e=>{
+  if(!running) return;
+  const cx=e.clientX,cy=e.clientY;
+  let hit=false;
+  targets=targets.filter(t=>{
+    if(!hit&&Math.hypot(cx-t.x,cy-t.y)<t.r){hit=true;return false;}
+    return true;
+  });
+  if(hit){ hits++; score+=Math.max(5,Math.round(100-ts)); }
+});
+document.getElementById('startBtn').addEventListener('click',startGame);
+ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,800,600);
+</script>
+</body>
+</html>

@@ -61,6 +61,10 @@ const elements = {
   worstEx: document.getElementById('worst-ex'),
   worstExSub: document.getElementById('worst-ex-sub'),
   analyticsView: document.getElementById('analytics-view'),
+  fpView: document.getElementById('fp-view'),
+  gamesView: document.getElementById('games-view'),
+  scheduleView: document.getElementById('schedule-view'),
+  reportsView: document.getElementById('reports-view'),
   anStreak: document.getElementById('an-streak'),
   anTotal: document.getElementById('an-total'),
   anTotalSub: document.getElementById('an-total-sub'),
@@ -257,28 +261,40 @@ function showTab(tab) {
   const isFocused = tab === 'focused';
   const isAnalytics = tab === 'analytics';
   const isTest = tab === 'test';
+  const isFpGate = tab === 'fpgate';
+  const isGames    = tab === 'games';
+  const isSchedule = tab === 'schedule';
+  const isReports  = tab === 'reports';
   if (elements.homeView) elements.homeView.style.display = isHome ? 'flex' : 'none';
   if (elements.videoView) elements.videoView.style.display = isVideo ? 'flex' : 'none';
   if (elements.focusedView) elements.focusedView.style.display = isFocused ? 'flex' : 'none';
   if (elements.analyticsView) elements.analyticsView.style.display = isAnalytics ? 'flex' : 'none';
+  if (elements.fpView) elements.fpView.style.display = isFpGate ? 'grid' : 'none';
+  if (elements.gamesView) elements.gamesView.style.display = isGames ? 'flex' : 'none';
+  if (elements.scheduleView) elements.scheduleView.style.display = isSchedule ? 'flex' : 'none';
+  if (elements.reportsView) elements.reportsView.style.display = isReports ? 'flex' : 'none';
   const testView = document.getElementById('test-view');
   if (testView) testView.style.display = isTest ? 'flex' : 'none';
-  if (elements.centerView) elements.centerView.style.display = (isHome || isVideo || isFocused || isAnalytics || isTest) ? 'none' : 'flex';
+  if (elements.centerView) elements.centerView.style.display = (isHome || isVideo || isFocused || isAnalytics || isTest || isFpGate || isGames || isSchedule || isReports) ? 'none' : 'flex';
   if (isHome) renderHome();
   if (isVideo) enterVideoPractice(); else leaveVideoPractice();
   if (isFocused) enterFocused(); else leaveFocused();
   if (isTest) enterTest(); else leaveTest();
+  if (isFpGate) enterFpGate(); else leaveFpGate();
   if (isAnalytics) renderAnalytics();
+  if (isGames) renderGames();
+  if (isSchedule && typeof window.renderSchedule === 'function') window.renderSchedule();
+  if (isReports  && typeof window.renderReports  === 'function') window.renderReports();
   // Single authoritative owner of the shared bridge lifecycle. The leave*
   // helpers no longer stop it themselves (that caused a stop-after-start kill
   // when sibling tabs share the bridge); we reconcile exactly once here.
-  const wantsBridge = isTest || isFocused || (isVideo && gate.loaded);
+  const wantsBridge = isTest || isFocused || isFpGate || (isVideo && gate.loaded);
   if (wantsBridge) startInBrowserTracking();
   else stopInBrowserTracking();
 }
-document.querySelectorAll('.exercise-card[data-tab]').forEach(btn => {
+document.querySelectorAll('.nav-tab[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => {
-    document.querySelectorAll('.exercise-card').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     showTab(btn.dataset.tab);
   });
@@ -330,6 +346,7 @@ if (window.motionbloomBridge && window.motionbloomBridge.onEvent) {
       gateOnMetrics(mm);
       focusedOnMetrics(mm);
       testOnMetrics(mm);
+      fpOnMetrics(mm);
     }
     else if (event.type === 'frame') { if (!window.__frameLogged) { window.__frameLogged = true; console.log('[trace] first frame received: points=' + event.points + ' active=' + testState.active); } testOnFrame(event); }
   });
@@ -1118,6 +1135,351 @@ function leaveTest() {
   // Bridge lifecycle is owned by showTab() — do not stop it here.
 }
 
+// ============================================================
+// FIRST-PERSON TREMOR GATE MODE (original clean-room implementation)
+// ============================================================
+const fp = {
+  active: false,
+  running: false,
+  rafId: 0,
+  lastTs: 0,
+  spawnTimer: 0,
+  tremorSmooth: null,
+  threshold: 50,
+  failStreak: 0,
+  passStreak: 0,
+  score: 0,
+  passed: 0,
+  missed: 0,
+  health: 100,
+  gates: [],
+  baseline: new AdaptiveBaseline(),
+  els: null
+};
+
+function fpEls() {
+  if (fp.els) return fp.els;
+  fp.els = {
+    canvas: document.getElementById('fp-canvas'),
+    status: document.getElementById('fp-status'),
+    threshold: document.getElementById('fp-threshold'),
+    live: document.getElementById('fp-live'),
+    score: document.getElementById('fp-score'),
+    passed: document.getElementById('fp-passed'),
+    missed: document.getElementById('fp-missed'),
+    health: document.getElementById('fp-health'),
+    start: document.getElementById('fp-start'),
+    reset: document.getElementById('fp-reset')
+  };
+  return fp.els;
+}
+
+function fpRecomputeThreshold() {
+  let thr = fp.baseline.personalAvgThreshold(8.0, 50.0);
+  thr += fp.failStreak * 6.0;
+  thr -= fp.passStreak * 2.0;
+  fp.threshold = Math.max(25, Math.min(90, thr));
+  return fp.threshold;
+}
+
+function fpReset() {
+  fp.score = 0;
+  fp.passed = 0;
+  fp.missed = 0;
+  fp.health = 100;
+  fp.gates = [];
+  fp.spawnTimer = 0;
+  fp.tremorSmooth = null;
+  fp.failStreak = 0;
+  fp.passStreak = 0;
+  fp.threshold = 50;
+  fp.baseline = new AdaptiveBaseline();
+  const els = fpEls();
+  if (els.score) els.score.textContent = '0';
+  if (els.passed) els.passed.textContent = '0';
+  if (els.missed) els.missed.textContent = '0';
+  if (els.health) els.health.textContent = '100';
+  if (els.threshold) els.threshold.textContent = 'Threshold: 50';
+  if (els.live) els.live.textContent = 'Live tremor: —';
+  if (els.status) els.status.textContent = 'Ready';
+}
+
+function fpSpawnGate() {
+  const lane = [-1, 0, 1][Math.floor(Math.random() * 3)];
+  fp.gates.push({ z: 1.15, lane, resolved: false });
+}
+
+function fpDraw() {
+  const els = fpEls();
+  const cv = els.canvas;
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  const W = cv.width;
+  const H = cv.height;
+  const horizon = H * 0.34;
+
+  const sky = ctx.createLinearGradient(0, 0, 0, H);
+  sky.addColorStop(0, '#0b1020');
+  sky.addColorStop(0.55, '#141a2a');
+  sky.addColorStop(1, '#0b0c10');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(255,255,255,.18)';
+  for (let i = 0; i < 7; i++) {
+    const t = i / 6;
+    const y = horizon + (H - horizon) * t * t;
+    ctx.beginPath();
+    ctx.moveTo(W * 0.12 + t * W * 0.18, y);
+    ctx.lineTo(W * 0.88 - t * W * 0.18, y);
+    ctx.stroke();
+  }
+
+  fp.gates.forEach((g) => {
+    const scale = 1 / Math.max(0.08, g.z);
+    const y = horizon + (H - horizon) * (1 - 1 / (1 + scale));
+    const laneOffset = g.lane * (W * 0.11) / (g.z + 0.2);
+    const gateW = Math.min(W * 0.42, W * 0.14 * scale);
+    const gateH = Math.min(H * 0.55, H * 0.18 * scale);
+    ctx.strokeStyle = g.resolved ? 'rgba(88,204,2,.55)' : 'rgba(230,57,70,.9)';
+    ctx.lineWidth = Math.max(2, 6 / g.z);
+    ctx.strokeRect(W / 2 - gateW / 2 + laneOffset, y - gateH, gateW, gateH);
+  });
+
+  ctx.strokeStyle = 'rgba(255,255,255,.75)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(W / 2 - 10, H / 2);
+  ctx.lineTo(W / 2 + 10, H / 2);
+  ctx.moveTo(W / 2, H / 2 - 10);
+  ctx.lineTo(W / 2, H / 2 + 10);
+  ctx.stroke();
+}
+
+function fpTick(ts) {
+  if (!fp.active || !fp.running) return;
+  if (!fp.lastTs) fp.lastTs = ts;
+  const dt = Math.min(0.05, (ts - fp.lastTs) / 1000);
+  fp.lastTs = ts;
+
+  fp.spawnTimer += dt;
+  if (fp.spawnTimer >= 2.4) {
+    fp.spawnTimer = 0;
+    fpSpawnGate();
+  }
+
+  const speed = 0.33;
+  fp.gates.forEach((g) => {
+    g.z -= speed * dt;
+    if (!g.resolved && g.z <= 0.15) {
+      const steady = fp.tremorSmooth !== null && fp.tremorSmooth <= fp.threshold;
+      g.resolved = true;
+      if (steady) {
+        fp.passed += 1;
+        fp.score += 10;
+        fp.passStreak = Math.min(fp.passStreak + 1, 10);
+        fp.failStreak = Math.max(fp.failStreak - 1, 0);
+      } else {
+        fp.missed += 1;
+        fp.score = Math.max(0, fp.score - 6);
+        fp.health = Math.max(0, fp.health - 10);
+        fp.failStreak = Math.min(fp.failStreak + 1, 6);
+        fp.passStreak = 0;
+      }
+    }
+  });
+  fp.gates = fp.gates.filter((g) => g.z > 0.02);
+
+  const els = fpEls();
+  if (els.score) els.score.textContent = String(fp.score);
+  if (els.passed) els.passed.textContent = String(fp.passed);
+  if (els.missed) els.missed.textContent = String(fp.missed);
+  if (els.health) els.health.textContent = String(fp.health);
+  if (els.status) {
+    if (fp.health <= 0) els.status.textContent = 'Run ended — health depleted';
+    else if (fp.tremorSmooth === null) els.status.textContent = 'Show hand to start gating';
+    else els.status.textContent = (fp.tremorSmooth <= fp.threshold) ? 'Gate open' : 'Gate blocked — steady up';
+  }
+
+  fpDraw();
+  if (fp.health <= 0) {
+    fp.running = false;
+    return;
+  }
+  fp.rafId = requestAnimationFrame(fpTick);
+}
+
+function fpStartStop() {
+  const els = fpEls();
+  if (!fp.running) {
+    fp.running = true;
+    fp.lastTs = 0;
+    if (els.start) els.start.textContent = 'Pause';
+    fp.rafId = requestAnimationFrame(fpTick);
+  } else {
+    fp.running = false;
+    if (els.start) els.start.textContent = 'Resume';
+    if (fp.rafId) cancelAnimationFrame(fp.rafId);
+  }
+}
+
+function fpOnMetrics(m) {
+  if (!fp.active) return;
+  if (!metricsTracked(m)) {
+    fp.tremorSmooth = null;
+    return;
+  }
+  const score = parseFloat(m.live_score);
+  const band = gateParsePercent(m.band_ratio);
+  const amp = gateParseNum(m.amp_mm);
+  if (!isNaN(score)) {
+    fp.tremorSmooth = fp.tremorSmooth === null ? score : (0.3 * score + 0.7 * fp.tremorSmooth);
+    fp.baseline.update(amp, band, score);
+    const thr = fpRecomputeThreshold();
+    const els = fpEls();
+    if (els.threshold) els.threshold.textContent = 'Threshold: ' + thr.toFixed(0);
+    if (els.live) els.live.textContent = 'Live tremor: ' + fp.tremorSmooth.toFixed(0);
+  }
+}
+
+function enterFpGate() {
+  fp.active = true;
+  const els = fpEls();
+  if (els.start && !els.start._wired) {
+    els.start._wired = true;
+    els.start.addEventListener('click', fpStartStop);
+  }
+  if (els.reset && !els.reset._wired) {
+    els.reset._wired = true;
+    els.reset.addEventListener('click', fpReset);
+  }
+  fpReset();
+  fpDraw();
+}
+
+function leaveFpGate() {
+  fp.active = false;
+  fp.running = false;
+  if (fp.rafId) cancelAnimationFrame(fp.rafId);
+  const els = fpEls();
+  if (els.start) els.start.textContent = 'Start run';
+}
+
+// ============================================================
+// GAMES CATALOG — 7 embedded games (1 original + 6 from GitHub)
+// ============================================================
+const GAMES_CATALOG = [
+  { name: 'Tremor Gauntlet',
+    type: 'First-person raycaster shooter',
+    use: 'WASD + mouse. 8 enemies. Weapon sway scales with your live tremor score.',
+    url: 'mb-local://mb-fps/index.html',
+    source: null, sourceUrl: null },
+  { name: 'Andromeda Invaders',
+    type: 'Space Invaders arcade',
+    use: 'Arrow keys or A/D to move, Space to fire. Shoot alien ships before they descend. Includes synth music.',
+    url: 'mb-local://gh-invaders/index.html',
+    source: 'susam/invaders', sourceUrl: 'https://github.com/susam/invaders' },
+  { name: 'Tetris',
+    type: 'Block stacking puzzle',
+    use: 'Arrow keys to move and rotate pieces. Clear complete rows before the stack reaches the top.',
+    url: 'mb-local://gh-tetris/index.html',
+    source: 'jakesgordon/javascript-tetris', sourceUrl: 'https://github.com/jakesgordon/javascript-tetris' },
+  { name: 'Breakout',
+    type: 'Brick breaker',
+    use: 'Move mouse or left/right arrow keys to steer the paddle. Break all the bricks to win. 3 lives.',
+    url: 'mb-local://gh-breakout/index.html',
+    source: 'end3r/Gamedev-Canvas-workshop', sourceUrl: 'https://github.com/end3r/Gamedev-Canvas-workshop' },
+  { name: 'Whack-A-Mole',
+    type: 'Reaction speed game',
+    use: 'Click the moles as they pop up from their holes. React fast to score points before the timer ends.',
+    url: 'mb-local://gh-whackamole/index.html',
+    source: 'Metroxe/one-html-page-challenge', sourceUrl: 'https://github.com/Metroxe/one-html-page-challenge' },
+  { name: 'Game of Life',
+    type: "Conway's cellular simulation",
+    use: "Click cells to toggle them alive or dead, then press Start. Watch the colony evolve by Conway's rules.",
+    url: 'mb-local://gh-gameoflife/index.html',
+    source: 'Metroxe/one-html-page-challenge', sourceUrl: 'https://github.com/Metroxe/one-html-page-challenge' },
+  { name: 'Hangman',
+    type: 'Word guessing',
+    use: 'Click letters or type on keyboard to guess the hidden word before the figure is complete. 9 wrong guesses allowed.',
+    url: 'mb-local://gh-hangman/index.html',
+    source: 'Metroxe/one-html-page-challenge', sourceUrl: 'https://github.com/Metroxe/one-html-page-challenge' },
+];
+
+function renderGames() {
+  const grid = document.getElementById('games-grid');
+  if (!grid) return;
+  if (grid._rendered) return;
+  grid._rendered = true;
+
+  grid.innerHTML = GAMES_CATALOG.map((g, i) => {
+    const sourceTag = g.source
+      ? '<div class="game-card-source"><span class="game-card-source-icon">&#9670;</span>' +
+        '<span class="game-card-source-label">GitHub: ' + g.source + '</span></div>'
+      : '<div class="game-card-source"><span class="game-card-source-label">MotionBloom Original</span></div>';
+    return '<div class="game-card" data-idx="' + i + '">' +
+      '<div class="game-card-name">' + g.name + '</div>' +
+      '<div class="game-card-type">' + g.type + '</div>' +
+      '<div class="game-card-use">' + g.use + '</div>' +
+      sourceTag +
+      '<button class="game-card-launch local" data-url="' + g.url + '" data-name="' + g.name + '" data-local="true">' +
+      'Play Now</button>' +
+      '</div>';
+  }).join('');
+
+  grid.addEventListener('click', function (e) {
+    const btn = e.target.closest('.game-card-launch');
+    if (btn) {
+      e.stopPropagation();
+      launchGame(btn.dataset.url, btn.dataset.name, true);
+    }
+  });
+
+  // Back button wires up here
+  const backBtn = document.getElementById('game-iframe-back');
+  if (backBtn && !backBtn._wired) {
+    backBtn._wired = true;
+    backBtn.addEventListener('click', closeGameIframe);
+  }
+}
+
+function launchGame(url, name, isLocal) {
+  if (!url) return;
+  if (isLocal) {
+    // Resolve mb-local:// → actual file path via bridge helper, or embed directly
+    const localPath = url.replace('mb-local://', '');
+    // Build file:// path by going up from renderer/ to electron/ then into games/
+    const base = window.location.href.replace(/\/renderer\/[^/]+$/, '');
+    const filePath = base + '/games/' + localPath;
+    const iframeWrap = document.getElementById('game-iframe-wrap');
+    const catalog    = document.getElementById('games-catalog');
+    const iframe     = document.getElementById('game-iframe');
+    const title      = document.getElementById('game-iframe-title');
+    if (iframeWrap && catalog && iframe) {
+      catalog.style.display    = 'none';
+      iframeWrap.style.display = 'flex';
+      if (title) title.textContent = name || 'Game';
+      iframe.src = filePath;
+    }
+  } else {
+    // External GitHub/web link — open in system browser
+    if (window.motionbloomBridge && typeof window.motionbloomBridge.openExternal === 'function') {
+      window.motionbloomBridge.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+}
+
+function closeGameIframe() {
+  const iframeWrap = document.getElementById('game-iframe-wrap');
+  const catalog    = document.getElementById('games-catalog');
+  const iframe     = document.getElementById('game-iframe');
+  if (iframeWrap) iframeWrap.style.display = 'none';
+  if (catalog)    catalog.style.display    = 'flex';
+  if (iframe)     iframe.src               = 'about:blank';
+}
+
 // ---------- INIT ----------
 setupCameraPreview();
 showTab('home');
@@ -1125,3 +1487,421 @@ showTab('home');
 // Expose for later phases.
 window.MotionBloomStore = Store;
 window.MotionBloomRecordSession = recordSession;
+
+// ============================================================
+// SCHEDULE
+// ============================================================
+(function() {
+  const SCHED_KEY = 'motionbloom.schedule.v1';
+
+  function getEvents() {
+    try { return JSON.parse(localStorage.getItem(SCHED_KEY) || '[]'); }
+    catch(_e) { return []; }
+  }
+  function saveEvents(evs) {
+    localStorage.setItem(SCHED_KEY, JSON.stringify(evs));
+  }
+  function addEvent(ev) {
+    const evs = getEvents();
+    evs.push(ev);
+    saveEvents(evs);
+  }
+  function deleteEvent(id) {
+    saveEvents(getEvents().filter(e => e.id !== id));
+  }
+
+  const TYPE_LABELS = { practice: 'Daily Practice', clinic: 'Clinic Visit', reminder: 'Reminder', custom: 'Custom' };
+  const TYPE_COLORS = { practice: 'practice', clinic: 'clinic', reminder: 'reminder', custom: 'custom' };
+
+  let calYear, calMonth;
+
+  function isoDate(y, m, d) {
+    return y + '-' + String(m+1).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+  }
+
+  function renderSchedule() {
+    const now = new Date();
+    if (!calYear) { calYear = now.getFullYear(); calMonth = now.getMonth(); }
+    renderCal();
+    renderUpcoming();
+    wireModal();
+  }
+  window._renderSchedule = renderSchedule;
+
+  function renderCal() {
+    const pane = document.getElementById('sched-cal-pane');
+    if (!pane) return;
+    const evs = getEvents();
+    const now = new Date();
+    const today = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+    const firstDay = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+    const monthName = new Date(calYear, calMonth, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    let html = '<div class="sched-header">' +
+      '<button class="sched-nav" id="sched-prev">&lt;</button>' +
+      '<span class="sched-month-title">' + monthName + '</span>' +
+      '<button class="sched-nav" id="sched-next">&gt;</button>' +
+      '</div><div class="cal-grid">';
+    ['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(d => { html += '<div class="cal-dow">' + d + '</div>'; });
+    for (let i = 0; i < firstDay; i++) html += '<div class="cal-day empty"></div>';
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = isoDate(calYear, calMonth, d);
+      const dayEvs = evs.filter(e => e.date === dateStr);
+      const isToday = dateStr === today;
+      const isPast = dateStr < today;
+      html += '<div class="cal-day' + (isToday?' today':'') + (isPast?' past':'') + '" data-date="' + dateStr + '">' +
+        '<span class="cal-num">' + d + '</span>' +
+        '<div class="cal-dots">' +
+        dayEvs.slice(0,5).map(e => '<div class="cal-dot ' + (TYPE_COLORS[e.type]||'custom') + '"></div>').join('') +
+        '</div></div>';
+    }
+    html += '</div>';
+    pane.innerHTML = html;
+
+    document.getElementById('sched-prev').addEventListener('click', () => {
+      calMonth--; if(calMonth<0){calMonth=11;calYear--;} renderCal();
+    });
+    document.getElementById('sched-next').addEventListener('click', () => {
+      calMonth++; if(calMonth>11){calMonth=0;calYear++;} renderCal();
+    });
+    pane.querySelectorAll('.cal-day:not(.empty)').forEach(cell => {
+      cell.addEventListener('click', () => openModal(cell.dataset.date));
+    });
+  }
+
+  function renderUpcoming() {
+    const list = document.getElementById('sched-up-list');
+    if (!list) return;
+    const now = new Date();
+    const todayStr = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+    const evs = getEvents()
+      .filter(e => e.date >= todayStr)
+      .sort((a,b) => (a.date+a.time) < (b.date+b.time) ? -1 : 1)
+      .slice(0, 20);
+    if (!evs.length) { list.innerHTML = '<p class="sched-empty">No upcoming events.<br>Click any day to add one.</p>'; return; }
+    list.innerHTML = evs.map(e => {
+      const dObj = new Date(e.date + 'T' + (e.time||'00:00'));
+      const dayLabel = e.date === todayStr ? 'Today' :
+        dObj.toLocaleDateString('default', { month:'short', day:'numeric' });
+      return '<div class="sched-ev-item">' +
+        '<div class="sched-ev-dot ' + (TYPE_COLORS[e.type]||'custom') + '"></div>' +
+        '<div class="sched-ev-info">' +
+          '<div class="sched-ev-title">' + (TYPE_LABELS[e.type]||e.type) + '</div>' +
+          '<div class="sched-ev-sub">' + dayLabel + (e.time ? ' · ' + e.time : '') + (e.note ? ' · ' + e.note : '') + '</div>' +
+        '</div>' +
+        '<button class="sched-ev-del" data-id="' + e.id + '" title="Delete">×</button>' +
+        '</div>';
+    }).join('');
+    list.querySelectorAll('.sched-ev-del').forEach(btn => {
+      btn.addEventListener('click', () => { deleteEvent(btn.dataset.id); renderUpcoming(); renderCal(); });
+    });
+  }
+
+  function openModal(dateStr) {
+    const bg = document.getElementById('sched-modal-bg');
+    const label = document.getElementById('sched-modal-date-label');
+    const existing = document.getElementById('sched-modal-existing');
+    if (!bg) return;
+    const d = new Date(dateStr + 'T00:00');
+    if (label) label.textContent = 'Events — ' + d.toLocaleDateString('default', { weekday:'short', month:'short', day:'numeric' });
+    // Show existing events for this day
+    const dayEvs = getEvents().filter(e => e.date === dateStr);
+    if (existing) {
+      existing.innerHTML = dayEvs.map(e =>
+        '<div class="sched-ev-item">' +
+        '<div class="sched-ev-dot ' + (TYPE_COLORS[e.type]||'custom') + '"></div>' +
+        '<div class="sched-ev-info"><div class="sched-ev-title">' + (TYPE_LABELS[e.type]||e.type) + '</div>' +
+        '<div class="sched-ev-sub">' + (e.time||'') + (e.note?' · '+e.note:'') + '</div></div>' +
+        '<button class="sched-ev-del" data-id="' + e.id + '">×</button>' +
+        '</div>'
+      ).join('');
+      existing.querySelectorAll('.sched-ev-del').forEach(btn => {
+        btn.addEventListener('click', () => { deleteEvent(btn.dataset.id); openModal(dateStr); renderUpcoming(); renderCal(); });
+      });
+    }
+    bg.dataset.date = dateStr;
+    bg.style.display = 'flex';
+  }
+
+  function wireModal() {
+    const bg = document.getElementById('sched-modal-bg');
+    const close = document.getElementById('sched-modal-close');
+    const save = document.getElementById('sched-modal-save');
+    const addBtn = document.getElementById('sched-add-today-btn');
+    if (!bg) return;
+
+    if (close && !close._wired) {
+      close._wired = true;
+      close.addEventListener('click', () => { bg.style.display='none'; });
+    }
+    bg.addEventListener('click', e => { if(e.target===bg) bg.style.display='none'; });
+
+    if (save && !save._wired) {
+      save._wired = true;
+      save.addEventListener('click', () => {
+        const type = document.getElementById('sched-type').value;
+        const time = document.getElementById('sched-time').value;
+        const note = document.getElementById('sched-note').value.trim();
+        const repeat = document.getElementById('sched-repeat').value;
+        const baseDate = bg.dataset.date;
+        if (!baseDate) return;
+        const dates = [baseDate];
+        if (repeat === 'daily') {
+          for (let i=1;i<30;i++) {
+            const d=new Date(baseDate+'T00:00'); d.setDate(d.getDate()+i);
+            dates.push(isoDate(d.getFullYear(),d.getMonth(),d.getDate()));
+          }
+        } else if (repeat === 'weekly') {
+          for (let i=1;i<8;i++) {
+            const d=new Date(baseDate+'T00:00'); d.setDate(d.getDate()+i*7);
+            dates.push(isoDate(d.getFullYear(),d.getMonth(),d.getDate()));
+          }
+        }
+        dates.forEach(dt => addEvent({ id: dt+'_'+type+'_'+Date.now(), date: dt, type, time, note }));
+        bg.style.display = 'none';
+        document.getElementById('sched-note').value = '';
+        renderCal(); renderUpcoming();
+      });
+    }
+
+    if (addBtn && !addBtn._wired) {
+      addBtn._wired = true;
+      addBtn.addEventListener('click', () => {
+        const now = new Date();
+        openModal(isoDate(now.getFullYear(), now.getMonth(), now.getDate()));
+      });
+    }
+  }
+
+  // Patch showTab to call our render
+  const _origRenderSchedule = window._renderSchedule;
+  window.renderSchedule = function() { if(_origRenderSchedule) _origRenderSchedule(); };
+})();
+
+// ============================================================
+// REPORTS
+// ============================================================
+(function() {
+  let reportRange = 7;
+
+  function renderReports() {
+    const rangeEl = document.getElementById('reports-range-btns');
+    if (rangeEl && !rangeEl._wired) {
+      rangeEl._wired = true;
+      rangeEl.querySelectorAll('.rng-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          rangeEl.querySelectorAll('.rng-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          reportRange = parseInt(btn.dataset.range, 10);
+          buildReports();
+        });
+      });
+    }
+    const expBtn = document.getElementById('reports-export-btn');
+    if (expBtn && !expBtn._wired) {
+      expBtn._wired = true;
+      expBtn.addEventListener('click', exportReport);
+    }
+    buildReports();
+  }
+  window.renderReports = renderReports;
+
+  function getFiltered() {
+    const all = getSessions();
+    if (!reportRange) return all;
+    const cutoff = Date.now() - reportRange * 86400000;
+    return all.filter(s => s.ts >= cutoff);
+  }
+
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  function buildReports() {
+    const sessions = getFiltered();
+    const allSessions = getSessions();
+    const statRow = document.getElementById('reports-stat-row');
+    const panels  = document.getElementById('reports-panels');
+    if (!statRow || !panels) return;
+
+    // ── Top stats ──────────────────────────────────────────────
+    const avgScore = sessions.length
+      ? Math.round(sessions.reduce((a,s) => a+s.score, 0) / sessions.length)
+      : null;
+    const bestScore = sessions.length ? Math.max(...sessions.map(s=>s.score)) : null;
+    const totalSec  = sessions.reduce((a,s) => a+(s.dur||0), 0);
+    const totalMin  = Math.round(totalSec/60);
+    // Trend vs previous equal window
+    let trendStr = '—';
+    if (reportRange && sessions.length) {
+      const cutoff = Date.now() - reportRange*86400000;
+      const prev = allSessions.filter(s => s.ts >= cutoff - reportRange*86400000 && s.ts < cutoff);
+      if (prev.length) {
+        const prevAvg = prev.reduce((a,s)=>a+s.score,0)/prev.length;
+        const diff = avgScore - prevAvg;
+        trendStr = (diff >= 0 ? '▲' : '▼') + ' ' + Math.abs(Math.round(diff)) + ' pts vs prev period';
+      }
+    }
+
+    statRow.innerHTML =
+      rptStat(avgScore !== null ? avgScore : '—', 'Avg Score', trendStr) +
+      rptStat(bestScore !== null ? bestScore : '—', 'Best Score', sessions.length + ' sessions') +
+      rptStat(sessions.length, 'Sessions', (reportRange ? 'Last ' + reportRange + 'd' : 'All time')) +
+      rptStat(totalMin + 'm', 'Time Practiced', totalSec > 0 ? formatDur(totalSec) : '—');
+
+    // ── Per-exercise table ──────────────────────────────────────
+    const exMap = {};
+    sessions.forEach(s => {
+      const ex = s.exercise || 'Unknown';
+      if (!exMap[ex]) exMap[ex] = { scores:[], total:0 };
+      exMap[ex].scores.push(s.score);
+      exMap[ex].total++;
+    });
+    const exRows = Object.entries(exMap)
+      .map(([ex, d]) => {
+        const avg = Math.round(d.scores.reduce((a,b)=>a+b,0)/d.scores.length);
+        const best = Math.max(...d.scores);
+        const trend = d.scores.length > 1 ? (d.scores[d.scores.length-1] > d.scores[0] ? '▲' : '▼') : '—';
+        return { ex, avg, best, count: d.total, trend };
+      })
+      .sort((a,b) => b.avg - a.avg);
+
+    let exTable = '<table class="rpt-table"><thead><tr><th>Exercise</th><th>Avg</th><th>Best</th><th>Sessions</th><th>Trend</th></tr></thead><tbody>';
+    if (exRows.length) {
+      exRows.forEach(r => {
+        exTable += '<tr><td>' + r.ex + '</td><td>' + r.avg + '</td><td>' + r.best + '</td><td>' + r.count + '</td><td class="rpt-trend">' + r.trend + '</td></tr>';
+      });
+    } else {
+      exTable += '<tr><td colspan="5" style="color:var(--text-muted);text-align:center;padding:20px">No sessions yet.</td></tr>';
+    }
+    exTable += '</tbody></table>';
+
+    // ── Day-of-week heatmap ─────────────────────────────────────
+    const dowCounts = [0,0,0,0,0,0,0];
+    const dowSums   = [0,0,0,0,0,0,0];
+    sessions.forEach(s => {
+      const d = new Date(s.ts).getDay();
+      dowCounts[d]++;
+      dowSums[d] += s.score;
+    });
+    const maxCount = Math.max(...dowCounts, 1);
+    let heatHtml = '<div class="heatmap-label-row">' + DOW.map(d=>'<div class="heatmap-lbl">'+d+'</div>').join('') + '</div>';
+    heatHtml += '<div class="heatmap-row">' + dowCounts.map((c,i) => {
+      const alpha = 0.08 + (c/maxCount)*0.88;
+      const avg = c ? Math.round(dowSums[i]/c) : null;
+      return '<div class="heatmap-cell" style="background:rgba(224,30,55,' + alpha.toFixed(2) + ')">' +
+        (c ? '<span>' + avg + '</span>' : '<span style="opacity:.3">—</span>') + '</div>';
+    }).join('') + '</div>' +
+    '<p style="font-size:10px;color:var(--text-muted);margin-top:7px">Colour = session count. Number = avg score on that day.</p>';
+
+    // ── Insights ──────────────────────────────────────────────
+    const insights = buildInsights(sessions, exRows, dowCounts, dowSums);
+
+    // ── Assemble panels ────────────────────────────────────────
+    panels.innerHTML =
+      '<div class="rpt-panel full"><div class="rpt-panel-title">Score by Exercise</div>' + exTable + '</div>' +
+      '<div class="rpt-panel"><div class="rpt-panel-title">Day of Week Heatmap</div>' + heatHtml + '</div>' +
+      '<div class="rpt-panel"><div class="rpt-panel-title">Insights</div><div class="insight-list">' +
+        insights.map(i => '<div class="insight-item"><span class="insight-bullet">' + i.icon + '</span><span>' + i.text + '</span></div>').join('') +
+      '</div></div>';
+  }
+
+  function rptStat(val, label, sub) {
+    return '<div class="rpt-stat"><div class="rpt-stat-val">' + val + '</div>' +
+      '<div class="rpt-stat-label">' + label + '</div>' +
+      '<div class="rpt-stat-sub">' + (sub||'&nbsp;') + '</div></div>';
+  }
+
+  function formatDur(sec) {
+    if (sec < 60) return sec + 's';
+    const h = (sec/3600)|0, m = ((sec%3600)/60)|0;
+    return (h ? h + 'h ' : '') + m + 'm';
+  }
+
+  function buildInsights(sessions, exRows, dowCounts, dowSums) {
+    const out = [];
+    if (!sessions.length) {
+      out.push({icon:'💡', text:'Complete your first session to see personalised insights here.'});
+      return out;
+    }
+    // Best day
+    const bestDow = dowCounts.reduce((best,c,i) => c>dowCounts[best]?i:best, 0);
+    if (dowCounts[bestDow]) out.push({icon:'📅', text:'You practice most on <strong>' + DOW[bestDow] + 's</strong> (' + dowCounts[bestDow] + ' sessions).'});
+    // Improvement trend
+    if (sessions.length >= 6) {
+      const first3 = sessions.slice(0,3).reduce((a,s)=>a+s.score,0)/3;
+      const last3  = sessions.slice(-3).reduce((a,s)=>a+s.score,0)/3;
+      const diff = Math.round(last3 - first3);
+      if (diff > 0) out.push({icon:'📈', text:'Average score improved by <strong>+' + diff + ' pts</strong> compared to your first sessions.'});
+      else if (diff < 0) out.push({icon:'📉', text:'Average score dropped by <strong>' + diff + ' pts</strong> vs your first sessions — keep going!'});
+      else out.push({icon:'➡️', text:'Your score has been consistent — try pushing for a new personal best.'});
+    }
+    // Best exercise
+    if (exRows.length) out.push({icon:'🏆', text:'Best exercise: <strong>' + exRows[0].ex + '</strong> (avg ' + exRows[0].avg + ').'});
+    // Needs work
+    if (exRows.length > 1) {
+      const worst = exRows[exRows.length-1];
+      out.push({icon:'🎯', text:'Focus area: <strong>' + worst.ex + '</strong> (avg ' + worst.avg + ') — room to improve.'});
+    }
+    // Consistency
+    const streak = (function(){
+      const days = new Set(sessions.map(s => new Date(s.ts).toDateString()));
+      let max=0, cur=0, prev=null;
+      const sorted=[...days].sort();
+      sorted.forEach(d => {
+        const dd = new Date(d);
+        if(prev && (dd-prev)/86400000===1) cur++; else cur=1;
+        if(cur>max) max=cur;
+        prev=dd;
+      });
+      return max;
+    })();
+    if (streak >= 3) out.push({icon:'🔥', text:'Best streak: <strong>' + streak + ' consecutive days</strong> — great consistency!'});
+    // Clinic reminder
+    const schedEvs = JSON.parse(localStorage.getItem('motionbloom.schedule.v1') || '[]');
+    const nextClinic = schedEvs.filter(e=>e.type==='clinic'&&e.date>=new Date().toISOString().slice(0,10)).sort((a,b)=>a.date<b.date?-1:1)[0];
+    if (nextClinic) out.push({icon:'🏥', text:'Next clinic visit: <strong>' + nextClinic.date + '</strong>' + (nextClinic.note?' — '+nextClinic.note:'') + '.'});
+    else out.push({icon:'🏥', text:'No clinic visit scheduled. Use the <strong>Schedule</strong> tab to add one.'});
+    return out;
+  }
+
+  function exportReport() {
+    const sessions = getSessions();
+    const filtered = getFiltered();
+    const title = 'MotionBloom Report — ' + new Date().toLocaleDateString();
+    const avgScore = filtered.length ? Math.round(filtered.reduce((a,s)=>a+s.score,0)/filtered.length) : 'N/A';
+    const best = filtered.length ? Math.max(...filtered.map(s=>s.score)) : 'N/A';
+    const tableRows = filtered.slice().reverse().map(s =>
+      '<tr><td>' + new Date(s.ts).toLocaleString() + '</td><td>' + (s.exercise||'—') + '</td><td>' + s.score + '</td><td>' + (s.dur ? formatDur(s.dur) : '—') + '</td></tr>'
+    ).join('');
+    const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + title + '</title>' +
+      '<style>body{font-family:system-ui,sans-serif;max-width:860px;margin:40px auto;color:#111;line-height:1.5}' +
+      'h1{color:#e01e37}h2{margin-top:28px;font-size:15px;color:#555;text-transform:uppercase;letter-spacing:.06em}' +
+      '.stats{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:20px}' +
+      '.stat{background:#f8f9fa;border-radius:12px;padding:16px 22px}' +
+      '.stat-val{font-size:32px;font-weight:900;color:#111}.stat-lbl{font-size:11px;color:#888;text-transform:uppercase}' +
+      'table{width:100%;border-collapse:collapse}th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #eee}th{background:#f1f3f5;font-size:12px}</style></head>' +
+      '<body><h1>🌸 MotionBloom Progress Report</h1>' +
+      '<p>Generated: ' + new Date().toLocaleString() + ' &nbsp;·&nbsp; Period: ' + (reportRange ? 'Last ' + reportRange + ' days' : 'All time') + '</p>' +
+      '<div class="stats">' +
+      '<div class="stat"><div class="stat-val">' + avgScore + '</div><div class="stat-lbl">Avg Score</div></div>' +
+      '<div class="stat"><div class="stat-val">' + best + '</div><div class="stat-lbl">Best Score</div></div>' +
+      '<div class="stat"><div class="stat-val">' + filtered.length + '</div><div class="stat-lbl">Sessions</div></div>' +
+      '<div class="stat"><div class="stat-val">' + Math.round(filtered.reduce((a,s)=>a+(s.dur||0),0)/60) + 'm</div><div class="stat-lbl">Time Practiced</div></div>' +
+      '</div>' +
+      '<h2>Session Log</h2>' +
+      '<table><thead><tr><th>Date &amp; Time</th><th>Exercise</th><th>Score</th><th>Duration</th></tr></thead><tbody>' +
+      tableRows + '</tbody></table>' +
+      '</body></html>';
+
+    // Try native save dialog via IPC, fallback to blob download
+    if (window.motionbloomBridge && typeof window.motionbloomBridge.saveReport === 'function') {
+      window.motionbloomBridge.saveReport(html, title + '.html');
+    } else {
+      const blob = new Blob([html], { type: 'text/html' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'MotionBloom_Report_' + new Date().toISOString().slice(0,10) + '.html';
+      a.click();
+    }
+  }
+})();

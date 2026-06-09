@@ -9,39 +9,25 @@
 <body>
   <!-- Top Navigation Bar -->
   <header class="header">
-    <div class="header-content">
-      <div class="logo-section">
-        <img src="../../motionbloom/assets/motionbloom_logo.png" alt="MotionBloom" class="logo" onerror="this.style.display='none'">
-        <div class="brand">
-          <h1>MotionBloom</h1>
-        </div>
-      </div>
-      <!-- stats removed: awaiting real, locally-stored progress -->
+    <div class="logo-section">
+      <img src="../../motionbloom/assets/motionbloom_logo.png" alt="MotionBloom" class="logo" onerror="this.style.display='none'">
+      <div class="brand"><h1>MotionBloom</h1></div>
     </div>
+    <nav class="top-nav" id="top-nav">
+      <button class="nav-tab active" data-tab="home">Home</button>
+      <button class="nav-tab" data-tab="video">Video</button>
+      <button class="nav-tab" data-tab="focused">Focused</button>
+      <button class="nav-tab" data-tab="analytics">Analytics</button>
+      <button class="nav-tab" data-tab="test">Topology</button>
+      <button class="nav-tab" data-tab="fpgate">Gates</button>
+      <button class="nav-tab" data-tab="games">Games</button>
+      <button class="nav-tab" data-tab="schedule">Schedule</button>
+      <button class="nav-tab" data-tab="reports">Reports</button>
+    </nav>
   </header>
 
   <!-- Main Content Area -->
-  <main class="main-layout">
-    <!-- Left Sidebar: cleared, awaiting new buttons -->
-    <aside class="sidebar">
-      <nav class="exercise-list">
-        <button class="exercise-card active" data-tab="home">
-          <div class="exercise-info"><h3>Home</h3></div>
-        </button>
-        <button class="exercise-card" data-tab="video">
-          <div class="exercise-info"><h3>Video Practice</h3></div>
-        </button>
-        <button class="exercise-card" data-tab="focused">
-          <div class="exercise-info"><h3>Focused Practice</h3></div>
-        </button>
-        <button class="exercise-card" data-tab="analytics">
-          <div class="exercise-info"><h3>Analytics</h3></div>
-        </button>
-        <button class="exercise-card" data-tab="test">
-          <div class="exercise-info"><h3>✋ Topology Test</h3></div>
-        </button>
-      </nav>
-    </aside>
+  <main class="main-content">
 
     <!-- Home View (no video) -->
     <section class="home-view" id="home-view">
@@ -143,7 +129,7 @@
               <div class="gate-overlay-msg" id="gate-msg"></div>
             </div>
           </div>
-          <button class="fs-btn" id="video-fs" type="button" title="Toggle fullscreen">⛶ Fullscreen</button>
+          <button class="fs-btn" id="video-fs" type="button" title="Toggle fullscreen">Fullscreen</button>
         </div>
         <aside class="camera-side">
           <div class="camera-side-label">You</div>
@@ -313,6 +299,106 @@
         <div class="test-status" id="test-status">Starting topology analysis…</div>
         <pre class="test-debug" id="test-debug" style="display:none"></pre>
       </aside>
+    </section>
+
+    <!-- First-Person Tremor Gate View -->
+    <section class="fp-view" id="fp-view" style="display:none">
+      <div class="fp-stage">
+        <canvas id="fp-canvas" width="960" height="540"></canvas>
+        <div class="fp-overlay">
+          <div class="fp-pill" id="fp-status">Warm up…</div>
+          <div class="fp-pill" id="fp-threshold">Threshold: —</div>
+          <div class="fp-pill" id="fp-live">Live tremor: —</div>
+        </div>
+      </div>
+      <aside class="fp-panel">
+        <h2 class="fp-title">First-Person Tremor Gates</h2>
+        <p class="fp-sub">Original MotionBloom mode: gates approach in first-person view. Stay below your adaptive tremor threshold while crossing gates to score.</p>
+        <div class="fp-metrics">
+          <div class="fp-metric"><span>Score</span><strong id="fp-score">0</strong></div>
+          <div class="fp-metric"><span>Passed</span><strong id="fp-passed">0</strong></div>
+          <div class="fp-metric"><span>Missed</span><strong id="fp-missed">0</strong></div>
+          <div class="fp-metric"><span>Health</span><strong id="fp-health">100</strong></div>
+        </div>
+        <div class="fp-controls">
+          <button id="fp-start" class="focused-skip" type="button">Start run</button>
+          <button id="fp-reset" class="focused-skip" type="button">Reset</button>
+        </div>
+      </aside>
+    </section>
+    <!-- Games View -->
+    <section class="games-view" id="games-view" style="display:none">
+      <!-- Game iframe (shown when a local game is launched) -->
+      <div class="game-iframe-wrap" id="game-iframe-wrap" style="display:none">
+        <div class="game-iframe-bar">
+          <span class="game-iframe-title" id="game-iframe-title">Game</span>
+          <button class="game-iframe-back" id="game-iframe-back">← Back to Games</button>
+        </div>
+        <iframe id="game-iframe" class="game-iframe" src="about:blank" allowfullscreen></iframe>
+      </div>
+      <!-- Catalog grid (shown when no game is running) -->
+      <div class="games-catalog" id="games-catalog">
+        <div class="analytics-head">
+          <h2>Games</h2>
+          <p class="analytics-sub">All games run <strong>inside MotionBloom</strong> — live tremor affects each one.</p>
+        </div>
+        <div class="games-grid" id="games-grid"></div>
+      </div>
+    </section>
+
+    <!-- Schedule View -->
+    <section class="schedule-view" id="schedule-view" style="display:none">
+      <div class="sched-cal-pane" id="sched-cal-pane"></div>
+      <div class="sched-aside">
+        <div class="sched-aside-head">
+          <span class="sched-aside-title">Upcoming</span>
+          <button class="sched-add-btn" id="sched-add-today-btn">+ Add Today</button>
+        </div>
+        <div class="sched-up-list" id="sched-up-list"><p class="sched-empty">No upcoming events.</p></div>
+      </div>
+      <div class="sched-modal-bg" id="sched-modal-bg" style="display:none">
+        <div class="sched-modal">
+          <div class="sched-modal-head">
+            <span id="sched-modal-date-label">Add Event</span>
+            <button class="sched-modal-close" id="sched-modal-close">&times;</button>
+          </div>
+          <div class="sched-modal-existing" id="sched-modal-existing"></div>
+          <div class="sched-modal-form">
+            <div class="sched-form-row"><label>Type</label>
+              <select id="sched-type">
+                <option value="practice">Daily Practice</option>
+                <option value="clinic">Clinic Visit</option>
+                <option value="reminder">Reminder</option>
+                <option value="custom">Custom</option>
+              </select></div>
+            <div class="sched-form-row"><label>Time</label><input type="time" id="sched-time" value="09:00"></div>
+            <div class="sched-form-row"><label>Note</label><input type="text" id="sched-note" placeholder="Optional note…" maxlength="80"></div>
+            <div class="sched-form-row"><label>Repeat</label>
+              <select id="sched-repeat">
+                <option value="none">No repeat</option>
+                <option value="daily">Daily (30 days)</option>
+                <option value="weekly">Weekly (8 weeks)</option>
+              </select></div>
+            <button class="sched-save-btn" id="sched-modal-save">Save Event</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Reports View -->
+    <section class="reports-view" id="reports-view" style="display:none">
+      <div class="reports-toolbar">
+        <h2>Reports</h2>
+        <div class="reports-range-btns" id="reports-range-btns">
+          <button class="rng-btn active" data-range="7">7 days</button>
+          <button class="rng-btn" data-range="30">30 days</button>
+          <button class="rng-btn" data-range="90">90 days</button>
+          <button class="rng-btn" data-range="0">All time</button>
+        </div>
+        <button class="reports-export-btn" id="reports-export-btn">Export HTML</button>
+      </div>
+      <div class="reports-stat-row" id="reports-stat-row"></div>
+      <div class="reports-panels" id="reports-panels"></div>
     </section>
   </main>
 
