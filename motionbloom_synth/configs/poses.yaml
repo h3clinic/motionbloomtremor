@@ -1,0 +1,285 @@
+# Hand Pose Library
+# Each pose defines bone rotation angles in degrees.
+# Bones follow the naming from handharness/rig_map.json
+# (thumb_meta, thumb_prox, thumb_dist, index_meta, index_prox, index_midd, etc.)
+#
+# Convention:
+#   Positive = flexion (curl inward)
+#   Negative = extension (straighten/spread)
+#   wrist_pitch: + = flexion, - = extension
+#   wrist_yaw: + = ulnar deviation, - = radial deviation
+#   wrist_roll: + = pronation, - = supination
+
+poses:
+  REST_OPEN:
+    description: "Relaxed open hand, fingers slightly curved"
+    wrist_pitch: 0
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 5
+    index_prox: 10
+    index_midd: 5
+    middle_meta: 5
+    middle_prox: 10
+    middle_midd: 5
+    ring_meta: 8
+    ring_prox: 12
+    ring_midd: 8
+    pinky_meta: 10
+    pinky_prox: 15
+    pinky_midd: 10
+
+  REST_CLOSED:
+    description: "Loose fist, fingers curled"
+    wrist_pitch: 0
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 25
+    thumb_prox: 40
+    thumb_dist: 30
+    index_meta: 45
+    index_prox: 80
+    index_midd: 70
+    middle_meta: 45
+    middle_prox: 80
+    middle_midd: 70
+    ring_meta: 45
+    ring_prox: 80
+    ring_midd: 70
+    pinky_meta: 45
+    pinky_prox: 80
+    pinky_midd: 70
+
+  PINCH:
+    description: "Thumb and index pinching, other fingers relaxed"
+    wrist_pitch: -5
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 35
+    thumb_prox: 45
+    thumb_dist: 20
+    index_meta: 30
+    index_prox: 45
+    index_midd: 25
+    middle_meta: 5
+    middle_prox: 10
+    middle_midd: 5
+    ring_meta: 8
+    ring_prox: 12
+    ring_midd: 8
+    pinky_meta: 10
+    pinky_prox: 15
+    pinky_midd: 10
+
+  POINTING:
+    description: "Index finger extended, others curled"
+    wrist_pitch: 0
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 20
+    thumb_prox: 30
+    thumb_dist: 15
+    index_meta: 0
+    index_prox: 0
+    index_midd: 0
+    middle_meta: 45
+    middle_prox: 80
+    middle_midd: 70
+    ring_meta: 45
+    ring_prox: 80
+    ring_midd: 70
+    pinky_meta: 45
+    pinky_prox: 80
+    pinky_midd: 70
+
+  PALM_UP:
+    description: "Open hand, palm facing up"
+    wrist_pitch: 0
+    wrist_yaw: 0
+    wrist_roll: -90
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 3
+    index_prox: 5
+    index_midd: 3
+    middle_meta: 3
+    middle_prox: 5
+    middle_midd: 3
+    ring_meta: 5
+    ring_prox: 8
+    ring_midd: 5
+    pinky_meta: 8
+    pinky_prox: 10
+    pinky_midd: 8
+
+  PALM_DOWN:
+    description: "Open hand, palm facing down (pronated)"
+    wrist_pitch: 0
+    wrist_yaw: 0
+    wrist_roll: 90
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 3
+    index_prox: 5
+    index_midd: 3
+    middle_meta: 3
+    middle_prox: 5
+    middle_midd: 3
+    ring_meta: 5
+    ring_prox: 8
+    ring_midd: 5
+    pinky_meta: 8
+    pinky_prox: 10
+    pinky_midd: 8
+
+  WRIST_FLEXION:
+    description: "Hand flexed downward at wrist"
+    wrist_pitch: 45
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 5
+    index_prox: 10
+    index_midd: 5
+    middle_meta: 5
+    middle_prox: 10
+    middle_midd: 5
+    ring_meta: 8
+    ring_prox: 12
+    ring_midd: 8
+    pinky_meta: 10
+    pinky_prox: 15
+    pinky_midd: 10
+
+  WRIST_EXTENSION:
+    description: "Hand extended upward at wrist"
+    wrist_pitch: -40
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 3
+    index_prox: 5
+    index_midd: 3
+    middle_meta: 3
+    middle_prox: 5
+    middle_midd: 3
+    ring_meta: 5
+    ring_prox: 8
+    ring_midd: 5
+    pinky_meta: 8
+    pinky_prox: 10
+    pinky_midd: 8
+
+  FINGER_TAP_INDEX:
+    description: "Index finger tapping position (partially flexed)"
+    wrist_pitch: -10
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 15
+    thumb_prox: 20
+    thumb_dist: 10
+    index_meta: 20
+    index_prox: 35
+    index_midd: 20
+    middle_meta: 5
+    middle_prox: 10
+    middle_midd: 5
+    ring_meta: 8
+    ring_prox: 12
+    ring_midd: 8
+    pinky_meta: 10
+    pinky_prox: 15
+    pinky_midd: 10
+
+  FINGER_TAP_MIDDLE:
+    description: "Middle finger tapping position"
+    wrist_pitch: -10
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 15
+    thumb_prox: 20
+    thumb_dist: 10
+    index_meta: 5
+    index_prox: 10
+    index_midd: 5
+    middle_meta: 20
+    middle_prox: 35
+    middle_midd: 20
+    ring_meta: 8
+    ring_prox: 12
+    ring_midd: 8
+    pinky_meta: 10
+    pinky_prox: 15
+    pinky_midd: 10
+
+  GRIP_RELEASE:
+    description: "Hand mid-release from grip (partially open)"
+    wrist_pitch: 5
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 15
+    thumb_prox: 25
+    thumb_dist: 15
+    index_meta: 25
+    index_prox: 40
+    index_midd: 30
+    middle_meta: 25
+    middle_prox: 40
+    middle_midd: 30
+    ring_meta: 25
+    ring_prox: 40
+    ring_midd: 30
+    pinky_meta: 25
+    pinky_prox: 40
+    pinky_midd: 30
+
+  REACH_FORWARD:
+    description: "Hand reaching forward, fingers extended"
+    wrist_pitch: -15
+    wrist_yaw: 0
+    wrist_roll: 0
+    thumb_meta: 5
+    thumb_prox: 5
+    thumb_dist: 3
+    index_meta: 0
+    index_prox: 3
+    index_midd: 2
+    middle_meta: 0
+    middle_prox: 3
+    middle_midd: 2
+    ring_meta: 2
+    ring_prox: 5
+    ring_midd: 3
+    pinky_meta: 5
+    pinky_prox: 8
+    pinky_midd: 5
+
+  REACH_SIDEWAYS:
+    description: "Hand reaching to the side with ulnar deviation"
+    wrist_pitch: 0
+    wrist_yaw: 20
+    wrist_roll: 0
+    thumb_meta: 5
+    thumb_prox: 8
+    thumb_dist: 5
+    index_meta: 3
+    index_prox: 5
+    index_midd: 3
+    middle_meta: 3
+    middle_prox: 5
+    middle_midd: 3
+    ring_meta: 5
+    ring_prox: 8
+    ring_midd: 5
+    pinky_meta: 8
+    pinky_prox: 10
+    pinky_midd: 8

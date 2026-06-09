@@ -1,0 +1,152 @@
+# Render Profiles
+# Visual conditions for rendering: lighting, backgrounds, skin tones,
+# post-processing artifacts.
+
+render:
+  resolution: 512
+  fps: 30
+  duration_sec: 4
+  format: "mp4"
+  codec: "H264"
+
+# --- Lighting Setups ---
+
+lighting:
+  indoor_soft:
+    description: "Soft diffuse indoor lighting"
+    type: "area"
+    energy: 800
+    color: [1.0, 0.95, 0.9]
+    position: [0, 0, 1.5]
+    size: 2.0
+    ambient: 0.3
+
+  indoor_harsh:
+    description: "Single overhead harsh light (shadows)"
+    type: "point"
+    energy: 1200
+    color: [1.0, 1.0, 1.0]
+    position: [0.3, -0.2, 1.8]
+    ambient: 0.1
+
+  outdoor_natural:
+    description: "Natural daylight, warm"
+    type: "sun"
+    energy: 5
+    color: [1.0, 0.98, 0.92]
+    direction: [-0.3, -0.5, -1.0]
+    ambient: 0.4
+
+  clinical_fluorescent:
+    description: "Cool fluorescent clinic lighting"
+    type: "area"
+    energy: 1000
+    color: [0.9, 0.95, 1.0]
+    position: [0, 0, 2.0]
+    size: 3.0
+    ambient: 0.35
+
+  low_light:
+    description: "Dim environment, higher noise"
+    type: "point"
+    energy: 300
+    color: [1.0, 0.9, 0.8]
+    position: [0.5, 0.3, 1.2]
+    ambient: 0.05
+
+
+# --- Backgrounds ---
+
+backgrounds:
+  white_clean:
+    description: "Plain white background"
+    color: [1.0, 1.0, 1.0]
+    type: "solid"
+
+  clinic_room:
+    description: "Clinical/office neutral beige"
+    color: [0.85, 0.82, 0.78]
+    type: "solid"
+
+  dark_desk:
+    description: "Dark wood desk surface"
+    color: [0.15, 0.12, 0.08]
+    type: "solid"
+
+  neutral_gray:
+    description: "Mid-gray background"
+    color: [0.5, 0.5, 0.5]
+    type: "solid"
+
+  home_cluttered:
+    description: "Home environment with some visual noise"
+    color: [0.6, 0.55, 0.5]
+    type: "noise"
+    noise_scale: 0.1
+
+
+# --- Skin Tones ---
+# Fitzpatrick scale approximations for material variation
+
+skin_tones:
+  light:
+    base_color: [0.87, 0.72, 0.60]
+    subsurface: 0.3
+    roughness: 0.5
+
+  medium_light:
+    base_color: [0.75, 0.55, 0.42]
+    subsurface: 0.35
+    roughness: 0.45
+
+  medium:
+    base_color: [0.60, 0.42, 0.30]
+    subsurface: 0.4
+    roughness: 0.4
+
+  medium_dark:
+    base_color: [0.42, 0.28, 0.18]
+    subsurface: 0.45
+    roughness: 0.38
+
+  dark:
+    base_color: [0.25, 0.16, 0.10]
+    subsurface: 0.5
+    roughness: 0.35
+
+
+# --- Post-Processing / Degradation ---
+# Simulates real-world capture artifacts
+
+degradation:
+  none:
+    description: "Clean render, no artifacts"
+    blur_radius: 0
+    noise_sigma: 0
+    compression_quality: 95
+
+  mild_blur:
+    description: "Slight motion blur or defocus"
+    blur_radius: 1
+    noise_sigma: 2
+    compression_quality: 85
+
+  compression_heavy:
+    description: "Heavy JPEG/H264 compression artifacts"
+    blur_radius: 0
+    noise_sigma: 0
+    compression_quality: 40
+
+  noisy_lowlight:
+    description: "High sensor noise from low light"
+    blur_radius: 0
+    noise_sigma: 12
+    compression_quality: 75
+
+  partial_occlusion:
+    description: "Part of hand occluded (e.g. by desk edge)"
+    blur_radius: 0
+    noise_sigma: 2
+    compression_quality: 80
+    occlusion_fraction: 0.2
+    occlusion_side: "bottom"

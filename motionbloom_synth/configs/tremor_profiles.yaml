@@ -1,0 +1,171 @@
+# Tremor Profile Configuration
+# Defines tremor types, frequency bands, amplitude ranges, and affected joints.
+#
+# The tremor engine injects oscillation at the bone/joint level:
+#   joint_angle(t) = base_angle + tremor_component + noise_component
+#
+# Tremor function with biological imperfection:
+#   theta = A * sin(2π*f*t + φ) + 0.25*A * sin(2π*1.7f*t + φ2) + gaussian_noise
+
+# --- Tremor Types ---
+
+tremor_types:
+  POSTURAL_TREMOR:
+    description: "Tremor present when maintaining posture against gravity"
+    frequency_range: [4.0, 8.0]
+    amplitude_range: [0.5, 8.0]
+    typical_joints:
+      - wrist_pitch
+      - wrist_yaw
+      - index_meta
+      - middle_meta
+      - ring_meta
+    joint_coherence: 0.7  # How correlated joints are (0=independent, 1=identical)
+    onset_pattern: "gradual"  # gradual | sudden | intermittent
+
+  KINETIC_TREMOR:
+    description: "Tremor during voluntary movement (intention tremor)"
+    frequency_range: [3.0, 6.0]
+    amplitude_range: [1.0, 12.0]
+    typical_joints:
+      - wrist_pitch
+      - wrist_yaw
+      - index_prox
+      - index_midd
+      - middle_prox
+      - middle_midd
+    joint_coherence: 0.5
+    onset_pattern: "movement_triggered"
+
+  REST_TREMOR:
+    description: "Tremor present at rest, diminishes with movement"
+    frequency_range: [4.0, 6.0]
+    amplitude_range: [1.0, 10.0]
+    typical_joints:
+      - thumb_meta
+      - thumb_prox
+      - index_meta
+      - index_prox
+      - wrist_roll
+    joint_coherence: 0.8
+    onset_pattern: "constant"
+
+  FINGER_TREMOR:
+    description: "Isolated finger tremor (distal joints)"
+    frequency_range: [5.0, 10.0]
+    amplitude_range: [0.3, 6.0]
+    typical_joints:
+      - index_midd
+      - middle_midd
+      - ring_midd
+      - pinky_midd
+      - thumb_dist
+    joint_coherence: 0.3
+    onset_pattern: "intermittent"
+
+  WRIST_TREMOR:
+    description: "Predominantly wrist oscillation"
+    frequency_range: [4.0, 7.0]
+    amplitude_range: [1.0, 10.0]
+    typical_joints:
+      - wrist_pitch
+      - wrist_yaw
+      - wrist_roll
+    joint_coherence: 0.9
+    onset_pattern: "constant"
+
+  TRACKING_ARTIFACT:
+    description: "NOT real tremor. Simulates landmark tracking noise/jitter."
+    frequency_range: [15.0, 30.0]
+    amplitude_range: [0.1, 0.5]
+    typical_joints:
+      - index_midd
+      - middle_midd
+      - thumb_dist
+      - pinky_midd
+    joint_coherence: 0.0  # Fully independent random noise per joint
+    onset_pattern: "random_burst"
+
+  GROSS_HAND_MOVEMENT_NO_TREMOR:
+    description: "NOT tremor. Large deliberate hand motion without oscillation."
+    frequency_range: [0.5, 2.0]
+    amplitude_range: [0.0, 0.0]  # No actual tremor injected
+    typical_joints: []
+    joint_coherence: 0.0
+    onset_pattern: "none"
+    # Motion is handled by the motion_types below, not tremor injection
+
+
+# --- Severity Levels ---
+# Maps 0-100 score to amplitude/frequency parameters
+
+severity_levels:
+  0:
+    label: "no_tremor"
+    amplitude_degrees: 0.0
+    description: "No tremor present"
+  5:
+    label: "barely_perceptible"
+    amplitude_degrees: 0.2
+    description: "At limit of detection"
+  10:
+    label: "very_mild"
+    amplitude_degrees: 0.5
+    description: "Visible only on close inspection"
+  20:
+    label: "mild"
+    amplitude_degrees: 1.2
+    description: "Mild but clearly present"
+  35:
+    label: "low_moderate"
+    amplitude_degrees: 2.5
+    description: "Noticeable at arm's length"
+  50:
+    label: "moderate"
+    amplitude_degrees: 4.0
+    description: "Clearly visible"
+  65:
+    label: "moderate_severe"
+    amplitude_degrees: 6.0
+    description: "Significant functional impact"
+  80:
+    label: "severe"
+    amplitude_degrees: 8.5
+    description: "Large amplitude oscillation"
+  95:
+    label: "very_severe"
+    amplitude_degrees: 11.0
+    description: "Maximum severity"
+
+
+# --- Noise Model ---
+# Biological imperfection added to the pure sinusoid
+
+noise_model:
+  # Second harmonic (frequency × 1.7) at 25% amplitude
+  harmonic_ratio: 1.7
+  harmonic_amplitude_fraction: 0.25
+  # Gaussian noise standard deviation as fraction of amplitude
+  gaussian_noise_fraction: 0.08
+  # Phase drift rate (radians per second)
+  phase_drift_rate: 0.3
+  # Amplitude modulation (slow envelope variation)
+  amplitude_modulation_hz: 0.3
+  amplitude_modulation_depth: 0.15
+
+
+# --- Scoring Formula ---
+# severity = 0.55*amplitude_norm + 0.25*band_power_norm
+#           + 0.10*frequency_confidence + 0.10*duration_consistency
+# score = round(100 * severity)
+
+scoring_weights:
+  amplitude_norm: 0.55
+  band_power_norm: 0.25
+  frequency_confidence: 0.10
+  duration_consistency: 0.10
+
+# Normalization ranges
+scoring_normalization:
+  amplitude_max_degrees: 12.0
+  band_power_hz_range: [3.0, 12.0]

@@ -1,0 +1,119 @@
+# Camera Configuration
+# Defines camera angles for multi-view rendering.
+# All angles are relative to the hand center.
+#
+# Convention:
+#   azimuth: 0 = front, 90 = right side, -90 = left side, 180 = back
+#   elevation: 0 = level, 45 = above, -30 = below
+#   distance: meters from hand center
+
+cameras:
+  front:
+    description: "Direct frontal view of palm"
+    azimuth: 0
+    elevation: 0
+    distance: 0.35
+    fov: 50
+
+  front_oblique:
+    description: "Slightly angled frontal view (natural selfie angle)"
+    azimuth: 15
+    elevation: 10
+    distance: 0.38
+    fov: 50
+
+  side_right:
+    description: "Right side profile view"
+    azimuth: 90
+    elevation: 0
+    distance: 0.35
+    fov: 50
+
+  side_left:
+    description: "Left side profile view"
+    azimuth: -90
+    elevation: 0
+    distance: 0.35
+    fov: 50
+
+  top_down:
+    description: "Directly above looking down"
+    azimuth: 0
+    elevation: 80
+    distance: 0.30
+    fov: 55
+
+  top_oblique:
+    description: "Above and slightly in front"
+    azimuth: 10
+    elevation: 55
+    distance: 0.33
+    fov: 52
+
+  below_oblique:
+    description: "Below and slightly in front (under-desk angle)"
+    azimuth: 5
+    elevation: -25
+    distance: 0.36
+    fov: 50
+
+  three_quarter:
+    description: "Classic 3/4 view"
+    azimuth: 40
+    elevation: 20
+    distance: 0.36
+    fov: 50
+
+
+# --- Motion Types ---
+# Hand translation/rotation motion during the clip (NOT tremor)
+
+motion_types:
+  stationary:
+    description: "Hand stays in place"
+    translation_amplitude: 0.0
+    translation_frequency: 0.0
+    rotation_amplitude: 0.0
+    rotation_frequency: 0.0
+
+  slow_translation:
+    description: "Slow lateral drift"
+    translation_amplitude: 0.03  # meters
+    translation_frequency: 0.4   # Hz
+    translation_axis: [1, 0, 0]  # X-axis drift
+    rotation_amplitude: 0.0
+    rotation_frequency: 0.0
+
+  fast_translation:
+    description: "Faster hand movement (reaching)"
+    translation_amplitude: 0.08
+    translation_frequency: 0.8
+    translation_axis: [1, 0.3, 0]
+    rotation_amplitude: 0.0
+    rotation_frequency: 0.0
+
+  wrist_rotation:
+    description: "Slow wrist pronation/supination during clip"
+    translation_amplitude: 0.0
+    translation_frequency: 0.0
+    rotation_amplitude: 20.0  # degrees
+    rotation_frequency: 0.3
+    rotation_axis: "roll"
+
+  reaching_motion:
+    description: "Hand reaching forward and back"
+    translation_amplitude: 0.06
+    translation_frequency: 0.5
+    translation_axis: [0, 0, 1]  # Z-axis (toward camera)
+    rotation_amplitude: 5.0
+    rotation_frequency: 0.3
+    rotation_axis: "pitch"
+
+  grip_release_motion:
+    description: "Cycling between grip and release poses"
+    translation_amplitude: 0.01
+    translation_frequency: 0.0
+    rotation_amplitude: 0.0
+    rotation_frequency: 0.0
+    pose_transition: true
+    transition_frequency: 0.5  # Hz (one cycle per 2 seconds)
