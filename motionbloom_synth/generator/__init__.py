@@ -1,4 +1,12 @@
-"""Generator package for synthetic tremor dataset."""
+"""Generator package for synthetic tremor dataset.
+
+Two valid modes only:
+  - rigged_blender_hand (default): Uses handharness rigged .glb model
+  - official_mano: Only if real MANO_RIGHT.pkl passes validation
+
+NO fake/synthetic geometry mode exists. The generator refuses to run
+without validated assets.
+"""
 
 from .tremor_engine import (
     TremorParams,
@@ -17,6 +25,7 @@ from .label_writer import (
 )
 from .hand_rig import load_poses, load_rig_map, get_hand_model_path
 from .camera_engine import load_camera_config, get_camera_position
+from .validate_geometry import validate_mesh, validate_obj, validate_mano_pkl
 
 __all__ = [
     "TremorParams",

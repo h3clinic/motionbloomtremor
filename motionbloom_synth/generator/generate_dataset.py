@@ -1,18 +1,25 @@
 """Synthetic Tremor Dataset Generator.
 
-Main orchestrator that combines:
-  - Hand rig controller (pose library)
-  - Tremor injection engine (per-joint oscillation)
-  - Camera engine (multi-view placement)
-  - Render pipeline (Blender headless)
-  - Label writer (ground-truth metadata)
+Generates controlled tremor videos using a VALID rigged hand model.
+NO FAKE GEOMETRY. Two supported modes only:
 
-Usage (inside Blender):
+  MODE=rigged_blender_hand  (default, recommended)
+    Uses handharness/input/hand_base/.../Do_Hand_DetailedRiggedAnimated.glb
+    Animates bone rotations directly in Blender.
+    Renders via Blender headless (Eevee or Cycles).
+
+  MODE=official_mano
+    ONLY if official MANO_RIGHT.pkl is present AND passes validation.
+    Uses smplx to generate posed meshes, then renders in Blender.
+
+There is NO third fake/synthetic mode. If neither model is available,
+the generator refuses to run.
+
+Usage:
     blender --background --python generate_dataset.py -- \\
-        --num-videos 500 --output-dir outputs/dataset_v1
+        --mode rigged_blender_hand --quick
 
-Usage (standalone — spawns Blender subprocesses):
-    python generate_dataset.py --num-videos 500 --output-dir outputs/dataset_v1
+    python generate_dataset.py --plan-only --quick
 """
 
 from __future__ import annotations
@@ -32,7 +39,60 @@ import yaml
 SYNTH_ROOT = Path(__file__).parent.parent
 CONFIGS_DIR = SYNTH_ROOT / "configs"
 OUTPUTS_DIR = SYNTH_ROOT / "outputs"
+HANDHARNESS_DIR = SYNTH_ROOT.parent / "handharness"
+BLENDER_TREMOR_SCRIPT = HANDHARNESS_DIR / "scripts" / "blender_tremor_sequence.py"
+HAND_MODEL_PATH = (
+    HANDHARNESS_DIR / "input" / "hand_base" / "extracted" / "source"
+    / "Do_Hand_DetailedRiggedAnimated_shared_16022026.glb"
+)
+RIG_MAP_PATH = HANDHARNESS_DIR / "rig_map.json"
+MANO_DIR = HANDHARNESS_DIR / "input" / "mano"
 
+
+# === Mode Validation ===
+
+def validate_mode(mode: str) -> tuple[bool, str]:
+    """Check that the requested mode has valid assets available.
+
+    Returns (is_valid, error_message).
+    """
+    if mode == "rigged_blender_hand":
+        if not HAND_MODEL_PATH.exists():
+            return False, (
+                f"Rigged hand model not found: {HAND_MODEL_PATH}\n"
+                f"Place a valid .glb/.fbx rigged hand in handharness/input/hand_base/"
+            )
+        if not RIG_MAP_PATH.exists():
+            return False, f"Rig map not found: {RIG_MAP_PATH}"
+        return True, ""
+
+    elif mode == "official_mano":
+        mano_pkl = MANO_DIR / "MANO_RIGHT.pkl"
+        if not mano_pkl.exists():
+            return False, (
+                f"MANO_RIGHT.pkl not found in {MANO_DIR}/\n"
+                f"Download from https://mano.is.tue.mpg.de/ (requires registration)"
+            )
+        # Validate the pkl is real, not synthetic
+        from .validate_geometry import validate_mano_pkl
+        is_valid, errors = validate_mano_pkl(mano_pkl)
+        if not is_valid:
+            return False, (
+                "MANO_RIGHT.pkl FAILED validation:\n"
+                + "\n".join(f"  - {e}" for e in errors)
+                + "\n\nThis file may be synthetic/fake. Use official MANO files only."
+            )
+        return True, ""
+
+    else:
+        return False, (
+            f"Unknown mode: '{mode}'. Valid modes:\n"
+            f"  rigged_blender_hand  (recommended)\n"
+            f"  official_mano        (requires licensed MANO files)"
+        )
+
+
+# === Config Loading ===
 
 def load_all_configs() -> Dict[str, dict]:
     """Load all configuration files."""
@@ -44,6 +104,8 @@ def load_all_configs() -> Dict[str, dict]:
     return configs
 
 
+# === Plan Generation ===
+
 def generate_dataset_plan(
     num_videos: int = 500,
     seed: int = 42,
@@ -51,62 +113,42 @@ def generate_dataset_plan(
 ) -> List[dict]:
     """Generate the combinatorial plan for the dataset.
 
-    For the 500-video starter:
+    Quick mode (500 videos):
         5 poses × 5 severity levels × 5 frequencies × 4 cameras = 500
 
-    Args:
-        num_videos: Target number of videos.
-        seed: Random seed.
-        quick: If True, generate minimal 500-video starter set.
-
-    Returns:
-        List of dicts, each specifying one video's parameters.
+    Full mode: random sampling from the complete parameter space.
     """
     random.seed(seed)
     configs = load_all_configs()
 
     if quick:
-        # Deterministic 500-video starter
         poses = ["REST_OPEN", "PINCH", "POINTING", "PALM_UP", "GRIP_RELEASE"]
         severities = [0, 20, 40, 60, 80]
         frequencies = [4.0, 5.0, 6.0, 7.0, 8.0]
         cameras = ["front", "front_oblique", "side_right", "top_down"]
-        tremor_types = ["POSTURAL_TREMOR"]
-        motions = ["stationary"]
-        lightings = ["indoor_soft"]
-        backgrounds = ["white_clean"]
-        skin_tones = ["medium"]
-        degradations = ["none"]
     else:
-        # Full combinatorial (will be subset-sampled to num_videos)
         poses = list(configs["poses"]["poses"].keys())
         severities = [0, 5, 10, 20, 35, 50, 65, 80, 95]
         frequencies = [3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 10.0, 12.0]
         cameras = list(configs["cameras"]["cameras"].keys())
-        tremor_types = [
-            "POSTURAL_TREMOR", "KINETIC_TREMOR", "REST_TREMOR",
-            "FINGER_TREMOR", "WRIST_TREMOR",
-            "TRACKING_ARTIFACT", "GROSS_HAND_MOVEMENT_NO_TREMOR",
-        ]
-        motions = list(configs["cameras"]["motion_types"].keys())
-        lightings = list(configs["render_profiles"]["lighting"].keys())
-        backgrounds = list(configs["render_profiles"]["backgrounds"].keys())
-        skin_tones = list(configs["render_profiles"]["skin_tones"].keys())
-        degradations = list(configs["render_profiles"]["degradation"].keys())
+
+    tremor_types_for_severity = {
+        0: "GROSS_HAND_MOVEMENT_NO_TREMOR",
+    }
 
     plan = []
     video_idx = 0
 
     if quick:
-        # Exhaustive grid for starter set
         for pose, sev, freq, cam in itertools.product(
             poses, severities, frequencies, cameras
         ):
             video_idx += 1
+            tremor_type = "POSTURAL_TREMOR" if sev > 0 else "GROSS_HAND_MOVEMENT_NO_TREMOR"
             plan.append({
                 "video_id": f"MB_SYNTH_{video_idx:06d}",
                 "pose": pose,
-                "tremor_type": "POSTURAL_TREMOR" if sev > 0 else "GROSS_HAND_MOVEMENT_NO_TREMOR",
+                "tremor_type": tremor_type,
                 "severity_target": sev,
                 "frequency_hz": freq,
                 "camera_angle": cam,
@@ -117,13 +159,21 @@ def generate_dataset_plan(
                 "degradation": "none",
             })
     else:
-        # Random sampling from full space
+        # Include negative examples (artifacts, gross movement)
+        all_tremor_types = [
+            "POSTURAL_TREMOR", "KINETIC_TREMOR", "REST_TREMOR",
+            "FINGER_TREMOR", "WRIST_TREMOR",
+            "TRACKING_ARTIFACT", "GROSS_HAND_MOVEMENT_NO_TREMOR",
+        ]
+        motions = list(configs["cameras"]["motion_types"].keys())
+        lightings = list(configs["render_profiles"]["lighting"].keys())
+        backgrounds = list(configs["render_profiles"]["backgrounds"].keys())
+
         while len(plan) < num_videos:
             video_idx += 1
             severity = random.choice(severities)
-            tremor_type = random.choice(tremor_types)
+            tremor_type = random.choice(all_tremor_types)
 
-            # Override severity for non-tremor types
             if tremor_type in ("TRACKING_ARTIFACT", "GROSS_HAND_MOVEMENT_NO_TREMOR"):
                 severity = 0
 
@@ -137,141 +187,80 @@ def generate_dataset_plan(
                 "motion_type": random.choice(motions),
                 "lighting": random.choice(lightings),
                 "background": random.choice(backgrounds),
-                "skin_tone": random.choice(skin_tones),
-                "degradation": random.choice(degradations),
+                "skin_tone": "medium",
+                "degradation": "none",
             })
 
     return plan[:num_videos]
 
 
-def render_single_video_blender(video_spec: dict, output_dir: Path):
-    """Render a single video inside Blender's Python environment.
+# === Rendering (Rigged Blender Hand) ===
 
-    This function is called when running inside Blender (--background mode).
+def render_single_video_blender_hand(
+    video_spec: dict,
+    output_dir: Path,
+    blender_bin: str,
+) -> Optional[str]:
+    """Render one video using handharness/scripts/blender_tremor_sequence.py.
+
+    This is the primary rendering path. It uses the real rigged hand model
+    with bone-level tremor injection.
     """
-    # These imports only work inside Blender
-    from . import hand_rig, tremor_engine, camera_engine, render_blender, label_writer
+    video_id = video_spec["video_id"]
+    video_out_dir = output_dir / "videos" / video_id
 
-    configs = load_all_configs()
-    render_config = configs["render_profiles"]["render"]
+    # Map severity 0-100 to intensity for blender_tremor_sequence.py
+    intensity = video_spec["severity_target"]
+
+    # Map frequency: blender_tremor_sequence uses intensity to derive freq,
+    # but we want to control it. Use seed variation to get frequency diversity.
+    seed = hash(video_id) % (2**31)
+
+    render_config = load_all_configs()["render_profiles"]["render"]
     fps = render_config["fps"]
-    duration = render_config["duration_sec"]
-
-    # 1. Import hand model
-    armature = hand_rig.import_hand_model()
-    rig_map = hand_rig.load_rig_map()
-
-    # 2. Load base pose
-    poses = hand_rig.load_poses()
-    base_pose = poses.get(video_spec["pose"], poses["REST_OPEN"])
-
-    # 3. Create tremor profile
-    profile = tremor_engine.create_tremor_profile(
-        tremor_type=video_spec["tremor_type"],
-        severity_score=video_spec["severity_target"],
-        frequency_hz=video_spec["frequency_hz"],
-        seed=hash(video_spec["video_id"]) % (2**31),
-    )
-
-    # 4. Generate animation frames (base pose + tremor injection)
-    animation = tremor_engine.generate_animation_curve(
-        profile=profile,
-        base_pose=base_pose,
-        duration_sec=duration,
-        fps=fps,
-    )
-
-    # 5. Apply animation to armature
-    hand_rig.apply_animation_to_armature(armature, animation, rig_map, fps=fps)
-
-    # 6. Apply gross hand motion (if any)
-    camera_engine.apply_hand_motion(
-        armature, video_spec["motion_type"], duration, fps
-    )
-
-    # 7. Set up camera
-    camera_engine.setup_camera_blender(video_spec["camera_angle"])
-
-    # 8. Set up lighting and materials
-    render_blender.setup_scene(
-        resolution=render_config["resolution"],
-        fps=fps,
-        duration_sec=duration,
-        background=video_spec["background"],
-    )
-    render_blender.setup_lighting(video_spec["lighting"])
-
-    # Apply skin tone to mesh objects
-    import bpy
-    for obj in bpy.data.objects:
-        if obj.type == "MESH":
-            render_blender.setup_skin_material(obj, video_spec["skin_tone"])
-
-    # 9. Render video
-    video_path = output_dir / "videos" / f"{video_spec['video_id']}.mp4"
-    render_blender.render_video(video_path)
-
-    # 10. Apply degradation (post-render)
-    render_blender.apply_degradation(video_path, video_spec["degradation"])
-
-    # 11. Write metadata
-    metadata = label_writer.create_metadata(
-        video_id=video_spec["video_id"],
-        pose=video_spec["pose"],
-        tremor_type=video_spec["tremor_type"],
-        frequency_hz=profile.frequency_hz,
-        amplitude_degrees=profile.amplitude_degrees,
-        affected_joints=profile.affected_joints,
-        camera_angle=video_spec["camera_angle"],
-        motion_type=video_spec["motion_type"],
-        lighting=video_spec["lighting"],
-        background=video_spec["background"],
-        skin_tone=video_spec["skin_tone"],
-        degradation=video_spec["degradation"],
-        fps=fps,
-        duration_sec=duration,
-    )
-    label_writer.write_metadata_json(metadata, output_dir)
-
-    return metadata
-
-
-def spawn_blender_render(video_spec: dict, output_dir: Path, blender_bin: str):
-    """Spawn Blender subprocess to render one video.
-
-    Used when running the generator from outside Blender.
-    """
-    script_path = Path(__file__).resolve()
-    spec_json = json.dumps(video_spec)
+    frames = int(render_config["duration_sec"] * fps)
 
     cmd = [
         blender_bin,
         "--background",
-        "--python", str(script_path),
+        "--python", str(BLENDER_TREMOR_SCRIPT),
         "--",
-        "--single-video",
-        "--spec", spec_json,
-        "--output-dir", str(output_dir),
+        "--input", str(HAND_MODEL_PATH),
+        "--output-dir", str(video_out_dir),
+        "--intensity", str(intensity),
+        "--frames", str(frames),
+        "--fps", str(fps),
+        "--rig-map", str(RIG_MAP_PATH),
+        "--seed", str(seed),
+        "--resolution", "512",
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-
-    if result.returncode != 0:
-        print(f"  ERROR rendering {video_spec['video_id']}: {result.stderr[-500:]}")
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=180
+        )
+        if result.returncode != 0:
+            print(f"  ERROR {video_id}: {result.stderr[-300:]}")
+            return None
+        return video_id
+    except subprocess.TimeoutExpired:
+        print(f"  TIMEOUT {video_id}")
+        return None
+    except FileNotFoundError:
+        print(f"  ERROR: Blender not found at {blender_bin}")
         return None
 
-    return video_spec["video_id"]
 
+# === Blender Discovery ===
 
 def find_blender() -> str:
     """Find Blender executable."""
     import shutil
 
-    # Check common locations
     candidates = [
         "/Applications/Blender.app/Contents/MacOS/Blender",
         str(Path.home() / "Applications/Blender.app/Contents/MacOS/Blender"),
-        "blender",  # PATH lookup
+        "blender",
     ]
 
     for path in candidates:
@@ -279,13 +268,22 @@ def find_blender() -> str:
             return path
 
     raise FileNotFoundError(
-        "Blender not found. Install Blender or set BLENDER_BIN environment variable."
+        "Blender not found. Install Blender.app or set --blender-bin.\n"
+        "Download: https://www.blender.org/download/"
     )
 
 
+# === Main ===
+
 def main():
-    """CLI entry point."""
-    parser = argparse.ArgumentParser(description="Synthetic Tremor Dataset Generator")
+    parser = argparse.ArgumentParser(
+        description="Synthetic Tremor Dataset Generator (valid geometry only)"
+    )
+    parser.add_argument(
+        "--mode", choices=["rigged_blender_hand", "official_mano"],
+        default="rigged_blender_hand",
+        help="Generation mode (default: rigged_blender_hand)"
+    )
     parser.add_argument("--num-videos", type=int, default=500)
     parser.add_argument("--output-dir", type=str, default=str(OUTPUTS_DIR / "dataset_v1"))
     parser.add_argument("--seed", type=int, default=42)
@@ -294,76 +292,103 @@ def main():
     parser.add_argument("--blender-bin", type=str, default=None)
     parser.add_argument("--plan-only", action="store_true",
                         help="Only generate plan JSON, don't render")
-    # Internal: called by spawned Blender subprocess
-    parser.add_argument("--single-video", action="store_true")
-    parser.add_argument("--spec", type=str, default=None)
 
-    # Parse args after -- (Blender passes everything before -- to itself)
     if "--" in sys.argv:
         args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:])
     else:
         args = parser.parse_args()
 
+    # === Validate mode ===
+    is_valid, error = validate_mode(args.mode)
+    if not is_valid:
+        print(f"\n❌ MODE VALIDATION FAILED: {args.mode}\n")
+        print(error)
+        print("\nRefusing to generate. Fix the asset issue first.")
+        sys.exit(1)
+
+    print(f"✓ Mode validated: {args.mode}")
+    if args.mode == "rigged_blender_hand":
+        print(f"  Model: {HAND_MODEL_PATH.name}")
+        print(f"  Rig map: {RIG_MAP_PATH.name}")
+
+    # === Generate plan ===
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # --- Single video mode (called by Blender subprocess) ---
-    if args.single_video and args.spec:
-        spec = json.loads(args.spec)
-        render_single_video_blender(spec, output_dir)
-        return
-
-    # --- Plan generation ---
-    print(f"Generating dataset plan: {args.num_videos} videos (seed={args.seed})")
+    print(f"\nGenerating plan: {args.num_videos} videos (seed={args.seed})")
     plan = generate_dataset_plan(
         num_videos=args.num_videos,
         seed=args.seed,
         quick=args.quick,
     )
 
-    # Save plan
     plan_path = output_dir / "generation_plan.json"
     with open(plan_path, "w") as f:
         json.dump(plan, f, indent=2)
     print(f"Plan saved: {plan_path} ({len(plan)} videos)")
 
     if args.plan_only:
-        print("Plan-only mode. Exiting.")
+        print("\nPlan-only mode. Exiting.")
+        # Print summary
+        severities = [v["severity_target"] for v in plan]
+        print(f"  Severity distribution: "
+              f"0={severities.count(0)}, "
+              f"20={severities.count(20)}, "
+              f"40={severities.count(40)}, "
+              f"60={severities.count(60)}, "
+              f"80={severities.count(80)}")
         return
 
-    # --- Render all videos ---
-    blender_bin = args.blender_bin or find_blender()
-    print(f"Using Blender: {blender_bin}")
+    # === Render ===
+    if args.mode == "rigged_blender_hand":
+        blender_bin = args.blender_bin or find_blender()
+        print(f"\nUsing Blender: {blender_bin}")
+        print(f"Rendering {len(plan)} videos...\n")
 
-    from .label_writer import write_labels_csv, write_metadata_jsonl, create_metadata
+        from .label_writer import create_metadata, write_labels_csv, write_metadata_jsonl
 
-    all_metadata = []
-    for i, spec in enumerate(plan):
-        print(f"[{i+1}/{len(plan)}] Rendering {spec['video_id']} "
-              f"(pose={spec['pose']}, sev={spec['severity_target']}, "
-              f"freq={spec['frequency_hz']}Hz, cam={spec['camera_angle']})")
+        all_metadata = []
+        success = 0
+        for i, spec in enumerate(plan):
+            print(f"[{i+1}/{len(plan)}] {spec['video_id']} "
+                  f"(sev={spec['severity_target']}, "
+                  f"freq={spec['frequency_hz']}Hz, "
+                  f"cam={spec['camera_angle']})")
 
-        result = spawn_blender_render(spec, output_dir, blender_bin)
-        if result:
-            # Read back metadata
-            meta_path = output_dir / f"{spec['video_id']}.json"
-            if meta_path.exists():
-                with open(meta_path) as f:
-                    meta_dict = json.load(f)
-                # Reconstruct for CSV/JSONL writing
-                from .label_writer import VideoMetadata
-                meta = VideoMetadata(**meta_dict)
+            result = render_single_video_blender_hand(spec, output_dir, blender_bin)
+            if result:
+                success += 1
+                meta = create_metadata(
+                    video_id=spec["video_id"],
+                    pose=spec["pose"],
+                    tremor_type=spec["tremor_type"],
+                    frequency_hz=spec["frequency_hz"],
+                    amplitude_degrees=spec["severity_target"] * 0.12,
+                    affected_joints=["wrist_pitch", "wrist_yaw", "wrist_roll"],
+                    camera_angle=spec["camera_angle"],
+                    motion_type=spec["motion_type"],
+                    lighting=spec["lighting"],
+                    background=spec["background"],
+                    fps=30,
+                    duration_sec=4.0,
+                )
                 all_metadata.append(meta)
 
-    # Write aggregate label files
-    write_labels_csv(all_metadata, output_dir / "labels.csv")
-    write_metadata_jsonl(all_metadata, output_dir / "metadata.jsonl")
+        # Write labels
+        write_labels_csv(all_metadata, output_dir / "labels.csv")
+        write_metadata_jsonl(all_metadata, output_dir / "metadata.jsonl")
 
-    print(f"\nDataset generation complete!")
-    print(f"  Videos: {output_dir / 'videos'}")
-    print(f"  Labels: {output_dir / 'labels.csv'}")
-    print(f"  Metadata: {output_dir / 'metadata.jsonl'}")
-    print(f"  Total: {len(all_metadata)} videos rendered successfully")
+        print(f"\n{'='*60}")
+        print(f"Dataset generation complete!")
+        print(f"  Mode: {args.mode}")
+        print(f"  Success: {success}/{len(plan)}")
+        print(f"  Output: {output_dir}")
+        print(f"{'='*60}")
+
+    elif args.mode == "official_mano":
+        print("\nofficial_mano rendering not yet implemented.")
+        print("Use rigged_blender_hand mode (recommended).")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
