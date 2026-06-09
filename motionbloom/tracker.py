@@ -18,6 +18,7 @@ import mediapipe as mp
 import numpy as np
 
 from ._cv_lock import CV_LOCK
+from .tracking.optical_flow import SparseLKConfig, SparseLKTracker
 
 CAM_WIDTH = 640
 CAM_HEIGHT = 480
@@ -70,36 +71,271 @@ class PoseSnapshot:
     visibility: float = 0.0
 
 
+def _palm_body_frame(palm_xy: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, float] | None:
+    """Build a rigid right-handed 2D frame from the palm landmarks.
+
+    The palm skeleton (wrist + 4 MCPs) is treated as a near-rigid plate.
+    `up` is the unit vector from wrist (0) toward middle-MCP (9). `right`
+    is `up` rotated -90° so a right-handed hand viewed mirrored on screen
+    still produces a stable thumb-side axis. Returned values are the
+    palm center, the right-axis, the up-axis, and the body scale (the
+    wrist-to-middle-MCP distance, which is invariant under finger motion
+    and the most reliable hand-size proxy).
+    """
+    if palm_xy.shape != (5, 2) or not np.all(np.isfinite(palm_xy)):
+        return None
+    palm_center = palm_xy.mean(axis=0)
+    # Wrist is PALM_LANDMARKS[0]==0, middle-MCP is PALM_LANDMARKS[2]==9.
+    wrist = palm_xy[0]
+    middle_mcp = palm_xy[2]
+    up_vec = middle_mcp - wrist
+    body_scale = float(np.hypot(up_vec[0], up_vec[1]))
+    if not np.isfinite(body_scale) or body_scale < 1e-6:
+        return None
+    up_axis = up_vec / body_scale
+    # rotate up by -90deg: (x,y) -> (y, -x)  → "thumb-side" axis
+    right_axis = np.array([up_axis[1], -up_axis[0]], dtype=np.float64)
+    return palm_center, right_axis, up_axis, body_scale
+
+
 def compute_palm_relative_landmarks(
     landmark_xy: np.ndarray,
     *,
     min_hand_size: float = PALM_RELATIVE_MIN_HAND_SIZE,
 ) -> dict | None:
-    """Return palm-relative, hand-size-normalized landmark coordinates.
+    """Return palm-body-frame, hand-size-normalized landmark coordinates.
 
     Input coordinates are normalized image coordinates with shape (21, 2).
-    The palm center is wrist + MCP landmarks. The hand size is the all-landmark
-    bounding-box diagonal, clamped by `min_hand_size` to avoid noise blow-ups.
+    Landmarks are expressed in the **palm body frame** (origin = palm
+    center, axes built from the palm skeleton), then scaled by the hand
+    size. This makes the representation invariant to whole-hand
+    translation, rotation, and uniform scaling -- so MediaPipe's
+    per-frame re-localisation of the entire hand cancels out and only
+    *intra-hand* finger motion (real tremor) survives.
     """
     xy = np.asarray(landmark_xy, dtype=np.float64)
     if xy.shape[0] < 21 or xy.shape[1] != 2 or not np.all(np.isfinite(xy)):
         return None
-    palm_center = xy[list(PALM_LANDMARKS)].mean(axis=0)
+    palm_xy = xy[list(PALM_LANDMARKS)]
+    frame = _palm_body_frame(palm_xy)
     span = xy.max(axis=0) - xy.min(axis=0)
     hand_size = float(np.hypot(span[0], span[1]))
-    if hand_size < min_hand_size:
+    if hand_size < min_hand_size or frame is None:
         return None
+    palm_center, right_axis, up_axis, body_scale = frame
+    # Normalisation: use body_scale (palm-rigid) so the representation
+    # does not depend on whether fingers are extended/curled (which
+    # affects the bounding-box diagonal). Keep `hand_size` in the return
+    # payload for backwards compatibility.
+    inv_scale = 1.0 / max(body_scale, 1e-6)
 
     relative: dict[str, tuple[float, float]] = {}
     for name, idx in {**PALM_RELATIVE_PRIMARY_LANDMARKS, **PALM_RELATIVE_DEBUG_LANDMARKS}.items():
-        delta = (xy[idx] - palm_center) / max(hand_size, 1e-6)
-        relative[name] = (float(delta[0]), float(delta[1]))
+        delta = xy[idx] - palm_center
+        rx = float(np.dot(delta, right_axis)) * inv_scale
+        ry = float(np.dot(delta, up_axis)) * inv_scale
+        relative[name] = (rx, ry)
 
     return {
         "palm_center": (float(palm_center[0]), float(palm_center[1])),
         "hand_size": hand_size,
+        "body_scale": body_scale,
+        "right_axis": (float(right_axis[0]), float(right_axis[1])),
+        "up_axis": (float(up_axis[0]), float(up_axis[1])),
         "relative": relative,
     }
+
+
+class PalmRigidStabilizer:
+    """Detect non-rigid MediaPipe snap events on the palm skeleton.
+
+    The palm landmarks (wrist + 4 MCPs) are physically rigid: their
+    *shape* in the palm-body frame should be essentially constant. Real
+    rotation/translation/scaling of the hand are absorbed by the body
+    frame; only MediaPipe re-detection that perturbs landmarks
+    non-rigidly produces residual shape error.
+
+    We maintain an EMA template of the palm landmarks in body-frame
+    coordinates and report the per-frame fit residual. Downstream code
+    multiplies its `tracking_quality` by `quality_weight(residual)` so
+    snap frames are softly excluded from tremor scoring.
+    """
+
+    def __init__(
+        self,
+        *,
+        template_alpha: float = 0.08,
+        soft_residual: float = 0.04,
+        hard_residual: float = 0.12,
+    ) -> None:
+        self._template: np.ndarray | None = None
+        self._alpha = float(template_alpha)
+        self._soft = float(soft_residual)
+        self._hard = float(hard_residual)
+
+    def reset(self) -> None:
+        self._template = None
+
+    def update(self, palm_xy_body: np.ndarray) -> float:
+        """Feed palm landmarks (5,2) already expressed in body frame.
+
+        Returns the rigid-shape residual (mean per-landmark distance to
+        template). Lower is better; 0 means perfect rigid match.
+        """
+        if palm_xy_body.shape != (5, 2) or not np.all(np.isfinite(palm_xy_body)):
+            return float("inf")
+        if self._template is None:
+            self._template = palm_xy_body.copy()
+            return 0.0
+        diff = palm_xy_body - self._template
+        residual = float(np.mean(np.hypot(diff[:, 0], diff[:, 1])))
+        # Slow EMA update so a real, sustained pose change is eventually
+        # absorbed, but a one-frame snap is not.
+        self._template = (1.0 - self._alpha) * self._template + self._alpha * palm_xy_body
+        return residual
+
+    def quality_weight(self, residual: float) -> float:
+        """Map a rigid residual to a [0,1] quality multiplier."""
+        if not np.isfinite(residual):
+            return 0.0
+        if residual <= self._soft:
+            return 1.0
+        if residual >= self._hard:
+            return 0.0
+        # Linear ramp soft→hard
+        return float(1.0 - (residual - self._soft) / max(self._hard - self._soft, 1e-9))
+
+
+class HandROIFlowSampler:
+    """Sparse Lucas-Kanade optical flow inside the MediaPipe hand ROI.
+
+    MediaPipe is used only to (a) locate the hand box and (b) provide
+    the palm body axes for projecting flow into a stable coordinate
+    frame. The actual sub-pixel tremor signal comes from LK tracking of
+    texture corners inside the hand, with a second LK tracker on the
+    background subtracted to remove camera shake / head motion.
+
+    Output (per frame): translation of the hand interior, expressed in
+    palm-body units (right_axis, up_axis components divided by body
+    scale in pixels). This is what should be fed to the tremor analyzer.
+    """
+
+    def __init__(
+        self,
+        *,
+        hand_config: SparseLKConfig | None = None,
+        background_config: SparseLKConfig | None = None,
+        fb_error_max_px: float = 1.5,
+    ) -> None:
+        self.hand = SparseLKTracker(hand_config or SparseLKConfig())
+        self.background = SparseLKTracker(
+            background_config
+            or SparseLKConfig(max_corners=40, min_distance=12, max_point_mad_px=8.0)
+        )
+        self._fb_error_max_px = float(fb_error_max_px)
+
+    def reset(self) -> None:
+        self.hand.reset()
+        self.background.reset()
+
+    def update(
+        self,
+        gray: np.ndarray,
+        *,
+        hand_box_px: tuple[int, int, int, int] | None,
+        right_axis: np.ndarray | None,
+        up_axis: np.ndarray | None,
+        body_scale_px: float,
+    ) -> dict | None:
+        """Run a single LK update step and return body-frame motion.
+
+        Args:
+            gray: grayscale frame, uint8.
+            hand_box_px: (left, top, right, bottom) in pixels, or None.
+            right_axis, up_axis: palm-body axes (unit vectors in image
+                coordinates, normalised image space is fine since they
+                are unit vectors).
+            body_scale_px: palm body scale expressed in pixels (used to
+                normalise the displacement).
+        """
+        if gray.ndim != 2:
+            return None
+        if hand_box_px is None or right_axis is None or up_axis is None:
+            self.reset()
+            return None
+        l, t, r, b = hand_box_px
+        h, w = gray.shape[:2]
+        l = max(0, min(w - 1, int(l)))
+        r = max(l + 1, min(w, int(r)))
+        t = max(0, min(h - 1, int(t)))
+        b = max(t + 1, min(h, int(b)))
+        if (r - l) < 16 or (b - t) < 16:
+            return None
+        hand_mask = np.zeros((h, w), dtype=np.uint8)
+        hand_mask[t:b, l:r] = 255
+        # Background = everything outside a padded hand box
+        pad_x = int(0.3 * (r - l))
+        pad_y = int(0.3 * (b - t))
+        bl = max(0, l - pad_x)
+        bt = max(0, t - pad_y)
+        br = min(w, r + pad_x)
+        bb = min(h, b + pad_y)
+        background_mask = np.full((h, w), 255, dtype=np.uint8)
+        background_mask[bt:bb, bl:br] = 0
+
+        hand_motion = self.hand.update(gray, mask=hand_mask)
+        bg_motion = self.background.update(gray, mask=background_mask)
+
+        # Residual pixel displacement = hand interior minus camera/global shake.
+        if bg_motion.usable:
+            resid_dx_px = hand_motion.dx - bg_motion.dx
+            resid_dy_px = hand_motion.dy - bg_motion.dy
+            bg_subtracted = True
+        else:
+            resid_dx_px = hand_motion.dx
+            resid_dy_px = hand_motion.dy
+            bg_subtracted = False
+
+        # Project into palm-body axes (unit vectors) -> still in pixels.
+        rx = float(right_axis[0])
+        ry = float(right_axis[1])
+        ux = float(up_axis[0])
+        uy = float(up_axis[1])
+        body_dx_px = resid_dx_px * rx + resid_dy_px * ry
+        body_dy_px = resid_dx_px * ux + resid_dy_px * uy
+
+        # Normalise by palm body scale (in pixels). Output is unitless:
+        # 1.0 == one palm-length of displacement per frame.
+        scale = max(float(body_scale_px), 1e-3)
+        body_dx = body_dx_px / scale
+        body_dy = body_dy_px / scale
+
+        # Quality: combine hand survival, point count, and MAD spread.
+        mad_quality = 1.0 / (1.0 + 0.5 * hand_motion.robust_mad)
+        survival_quality = float(hand_motion.track_survival_rate)
+        point_quality = min(1.0, hand_motion.valid_points / 20.0)
+        flow_quality = float(
+            max(0.0, min(1.0, 0.4 * survival_quality + 0.4 * point_quality + 0.2 * mad_quality))
+        )
+
+        return {
+            "body_dx": float(body_dx),
+            "body_dy": float(body_dy),
+            "body_dx_px": float(body_dx_px),
+            "body_dy_px": float(body_dy_px),
+            "hand_dx_px": float(hand_motion.dx),
+            "hand_dy_px": float(hand_motion.dy),
+            "bg_dx_px": float(bg_motion.dx),
+            "bg_dy_px": float(bg_motion.dy),
+            "valid_points": int(hand_motion.valid_points),
+            "total_points": int(hand_motion.total_points),
+            "survival_rate": float(hand_motion.track_survival_rate),
+            "mad_px": float(hand_motion.robust_mad),
+            "flow_quality": flow_quality,
+            "bg_subtracted": bool(bg_subtracted),
+            "usable": bool(hand_motion.usable),
+            "body_scale_px": float(scale),
+        }
 
 
 class TremorTracker:
@@ -110,6 +346,10 @@ class TremorTracker:
         self.box_micro_samples: deque = deque(maxlen=4096)
         self.palm_center_samples: deque = deque(maxlen=4096)
         self.palm_relative_samples: deque = deque(maxlen=4096)
+        # Optical-flow tremor stream: each row is
+        # (t, body_dx, body_dy, valid_points, survival, flow_quality,
+        #  bg_dx_body, bg_dy_body)
+        self.flow_samples: deque = deque(maxlen=4096)
         self.stop_event = Event()
         self.thread: Thread | None = None
 
@@ -129,6 +369,16 @@ class TremorTracker:
         self._grip_strength: float = 0.0
 
         self._cap: "cv2.VideoCapture | None" = None
+
+        # Geometry-anchored stabiliser: detects MediaPipe non-rigid snap
+        # events on the palm skeleton so downstream tremor scoring can
+        # softly reject those frames.
+        self._palm_stabilizer = PalmRigidStabilizer()
+        # ROI optical-flow tremor sampler. MediaPipe is the coarse ROI
+        # anchor; LK measures the actual sub-pixel motion.
+        self._flow_sampler = HandROIFlowSampler()
+        # Latest per-frame flow diagnostics (for UI / debugging).
+        self._flow_status: dict | None = None
 
         # Session recording state
         self._rec_lock = Lock()
@@ -180,6 +430,12 @@ class TremorTracker:
         self.box_micro_samples.clear()
         self.palm_center_samples.clear()
         self.palm_relative_samples.clear()
+        self.flow_samples.clear()
+        self._flow_sampler.reset()
+        self._palm_stabilizer.reset()
+        self.flow_samples.clear()
+        self._flow_sampler.reset()
+        self._flow_status = None
 
     def start(self, cap: "cv2.VideoCapture") -> None:
         if self.thread and self.thread.is_alive():
@@ -343,6 +599,28 @@ class TremorTracker:
         if arr.shape[0] < 16:
             return None
         return tuple(arr[:, i] for i in range(arr.shape[1]))
+
+    def snapshot_flow(self, seconds: float) -> tuple[np.ndarray, ...] | None:
+        """Get ROI optical-flow tremor stream.
+
+        Returns:
+            (t, body_dx, body_dy, valid_points, survival,
+             flow_quality, bg_dx_body, bg_dy_body)
+            or None if insufficient data.
+        """
+        if len(self.flow_samples) < 16:
+            return None
+        arr = np.array(self.flow_samples, dtype=np.float64)
+        now = arr[-1, 0]
+        mask = arr[:, 0] >= now - seconds
+        arr = arr[mask]
+        if arr.shape[0] < 16:
+            return None
+        return tuple(arr[:, i] for i in range(arr.shape[1]))
+
+    def get_flow_status(self) -> dict | None:
+        """Latest per-frame optical-flow diagnostics, or None."""
+        return self._flow_status
 
     # ----------------------------------------------------------- main loop
     def _run(self) -> None:
@@ -622,6 +900,22 @@ class TremorTracker:
                     if palm_relative is not None:
                         rel = palm_relative["relative"]
                         rel_palm = palm_relative["palm_center"]
+                        # Express palm landmarks in the just-built body
+                        # frame and feed them to the rigid stabiliser.
+                        # Palm shape in body frame should be ~constant;
+                        # any change is a non-rigid MediaPipe snap.
+                        right_axis = np.asarray(palm_relative["right_axis"], dtype=np.float64)
+                        up_axis = np.asarray(palm_relative["up_axis"], dtype=np.float64)
+                        body_scale = max(float(palm_relative["body_scale"]), 1e-6)
+                        palm_body = np.empty((5, 2), dtype=np.float64)
+                        center = np.asarray(palm_relative["palm_center"], dtype=np.float64)
+                        for i_pl, lm_i in enumerate(PALM_LANDMARKS):
+                            d = landmark_xy[lm_i] - center
+                            palm_body[i_pl, 0] = float(np.dot(d, right_axis)) / body_scale
+                            palm_body[i_pl, 1] = float(np.dot(d, up_axis)) / body_scale
+                        snap_residual = self._palm_stabilizer.update(palm_body)
+                        snap_weight = self._palm_stabilizer.quality_weight(snap_residual)
+                        adj_quality = float(max(0.0, min(1.0, tracking_quality * snap_weight)))
                         self.palm_relative_samples.append((
                             now,
                             rel["index_tip"][0], rel["index_tip"][1],
@@ -633,12 +927,55 @@ class TremorTracker:
                             rel["middle_mcp"][0], rel["middle_mcp"][1],
                             rel_palm[0], rel_palm[1],
                             palm_relative["hand_size"],
-                            tracking_quality,
+                            adj_quality,
                         ))
+
+                        # --- ROI optical-flow tremor ---------------------------
+                        # MediaPipe gives us the ROI + body axes. LK gives
+                        # us the actual sub-pixel motion. Background LK
+                        # subtracts camera shake.
+                        try:
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            hand_box_px = (
+                                box_left_px,
+                                box_top_px,
+                                box_right_px,
+                                box_bottom_px,
+                            )
+                            # body_scale is in normalised image x-units;
+                            # convert to pixels using frame width as
+                            # the dominant scale.
+                            body_scale_px = float(palm_relative["body_scale"]) * float(w)
+                            flow = self._flow_sampler.update(
+                                gray,
+                                hand_box_px=hand_box_px,
+                                right_axis=right_axis,
+                                up_axis=up_axis,
+                                body_scale_px=body_scale_px,
+                            )
+                        except Exception:
+                            flow = None
+                        if flow is not None:
+                            self._flow_status = flow
+                            self.flow_samples.append((
+                                now,
+                                flow["body_dx"], flow["body_dy"],
+                                float(flow["valid_points"]),
+                                flow["survival_rate"],
+                                flow["flow_quality"] * snap_weight,
+                                # store bg motion in body axes (px-normalised)
+                                (flow["bg_dx_px"] * float(right_axis[0])
+                                 + flow["bg_dy_px"] * float(right_axis[1])) / max(body_scale_px, 1e-3),
+                                (flow["bg_dx_px"] * float(up_axis[0])
+                                 + flow["bg_dy_px"] * float(up_axis[1])) / max(body_scale_px, 1e-3),
+                            ))
                 else:
                     self.hand_present = False
                     self._hand_tip_norm = None
                     self._grip_strength = 0.0
+                    self._palm_stabilizer.reset()
+                    self._flow_sampler.reset()
+                    self._flow_status = None
 
                 while self.samples and now - self.samples[0][0] > BUFFER_SECONDS:
                     self.samples.popleft()
@@ -652,6 +989,8 @@ class TremorTracker:
                     self.palm_center_samples.popleft()
                 while self.palm_relative_samples and now - self.palm_relative_samples[0][0] > BUFFER_SECONDS:
                     self.palm_relative_samples.popleft()
+                while self.flow_samples and now - self.flow_samples[0][0] > BUFFER_SECONDS:
+                    self.flow_samples.popleft()
 
                 # Publish the annotated frame (overlays) for display.
                 try:

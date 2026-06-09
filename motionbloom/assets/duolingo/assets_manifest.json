@@ -1,0 +1,99 @@
+{
+  "defaults": {
+    "image_models": ["imagen-3.0-generate-002", "gemini-2.5-flash-image-preview"],
+    "theme": "bright cherry red (#e63946) and clean white",
+    "style": "Modern flat 2D vector illustration, bold rounded shapes, thick clean outlines, Duolingo-style gamified app icon, centered subject, transparent background, no text unless requested"
+  },
+  "assets": [
+    {
+      "name": "motionbloom_logo",
+      "type": "logo",
+      "size": "512x512",
+      "prompt": "App logo for 'MotionBloom', a hand-tremor health app. A stylized open hand merging into a blooming flower, formed from smooth flowing motion lines. Bright cherry red (#e63946) and white. Modern minimalist flat vector mark, bold rounded geometry, transparent background, centered, no text."
+    },
+    {
+      "name": "bloom_idle",
+      "type": "mascot",
+      "size": "256x256",
+      "prompt": "Mascot character 'Bloom' for a health app: a friendly cartoon hand-flower creature with a calm curious smile, standing neutral. Bright cherry red (#e63946) and white, thick rounded outlines, flat 2D vector, Duolingo style, centered, transparent background."
+    },
+    {
+      "name": "bloom_wave",
+      "type": "mascot",
+      "size": "256x256",
+      "prompt": "Mascot 'Bloom' waving hello with a big warm smile, welcoming pose, one arm raised. Bright cherry red (#e63946) and white, thick rounded outlines, flat 2D vector, Duolingo style, centered, transparent background."
+    },
+    {
+      "name": "bloom_cheer",
+      "type": "mascot",
+      "size": "256x256",
+      "prompt": "Mascot 'Bloom' celebrating, jumping with both arms up, excited happy face, small sparkles around it. Bright cherry red (#e63946) and white, thick rounded outlines, flat 2D vector, Duolingo style, centered, transparent background."
+    },
+    {
+      "name": "bloom_sad",
+      "type": "mascot",
+      "size": "256x256",
+      "prompt": "Mascot 'Bloom' looking gently sad and supportive, slight frown, hand to chest, empathetic. Bright cherry red (#e63946) and white, thick rounded outlines, flat 2D vector, Duolingo style, centered, transparent background."
+    },
+    {
+      "name": "bloom_analyzing",
+      "type": "mascot",
+      "size": "256x256",
+      "prompt": "Mascot 'Bloom' thinking and focused, one hand on chin, concentrating, subtle motion lines. Bright cherry red (#e63946) and white, thick rounded outlines, flat 2D vector, Duolingo style, centered, transparent background."
+    },
+    {
+      "name": "streak_flame",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A bold rounded flame icon for a daily-streak badge. Bright cherry red (#e63946) with white highlight. Flat 2D vector, thick clean outline, centered, transparent background, no text."
+    },
+    {
+      "name": "xp_gem",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A faceted shiny gem icon for an XP/points badge. Cherry red (#e63946) with white sparkle highlights. Flat 2D vector, thick clean outline, centered, transparent background, no text."
+    },
+    {
+      "name": "heart",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A plump rounded heart icon for a lives/health counter. Bright cherry red (#e63946) with subtle white highlight. Flat 2D vector, thick clean outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ex_free",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A waving open hand icon representing a free-form hand check. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ex_nose",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A simple icon of a fingertip touching the tip of a nose, side profile, representing an intention-tremor test. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ex_head",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A simple icon of a hand resting on top of a head, representing a scratch-head kinetic test. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ex_hold",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A simple icon of a hand holding a cup out in front, representing a postural-tremor hold test. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ui_camera",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A minimalist camera icon. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    },
+    {
+      "name": "ui_reports",
+      "type": "icon",
+      "size": "128x128",
+      "prompt": "A minimalist bar-chart report icon. Cherry red (#e63946) and white, flat 2D vector, thick rounded outline, centered, transparent background, no text."
+    }
+  ]
+}

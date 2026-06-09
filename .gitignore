@@ -37,6 +37,9 @@ Thumbs.db
 !assets/**/*.mp4
 !assets/**/*.mov
 
+# Local agent scratch (screenshots, node compile cache, tmp)
+agent-runs/
+
 # Env
 .env
 .env.*

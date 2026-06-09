@@ -6,6 +6,7 @@ Senior-friendly card layout, large type, and plain-language guidance.
 from __future__ import annotations
 
 import csv
+import os
 import random
 import re
 import sys
@@ -27,7 +28,14 @@ from matplotlib.figure import Figure
 from PIL import Image, ImageTk
 from scipy.signal import welch
 
+try:
+    import customtkinter as ctk
+    HAS_CTK = True
+except ImportError:
+    HAS_CTK = False
+
 from motionbloom._cv_lock import CV_LOCK
+from motionbloom.ui import theme, assets
 
 from .exercises import EXERCISES, Exercise, ExerciseSession, Stage
 from .exercises import verify_hold_object, verify_touch_nose
@@ -52,6 +60,14 @@ from .tracker import CAM_HEIGHT, CAM_WIDTH, LANDMARK_CHOICES, TremorTracker
 from .video_gate import VideoGate
 from .video_player import LocalVideoPlayer, create_video_player
 from .reports import SessionReportStore
+
+# ---------- UI Framework configuration ----
+# Set MOTIONBLOOM_UI_EXPERIMENTAL=1 to enable CustomTkinter experimental shell
+MOTIONBLOOM_UI_EXPERIMENTAL = os.getenv("MOTIONBLOOM_UI_EXPERIMENTAL", "0") == "1"
+
+# Initialize CustomTkinter appearance if available
+if HAS_CTK:
+    theme.init_customtkinter_appearance()
 
 # ---------- Brand palette (white and red customer theme) -------------------
 BG = "#ffffff"               # white background
@@ -119,6 +135,92 @@ LOGO_ASSET = Path(__file__).with_name("assets") / "motionbloom_logo.png"
 STARTUP_VIDEO_ASSET = Path(__file__).with_name("assets") / "startup_intro.mp4"
 STARTUP_INTRO_SECONDS = 7.0
 APP_TAGLINE = "A simple hand-movement check with your camera."
+
+
+# Optical-flow source selection thresholds. Kept at module scope so
+# tests can reach the same logic the app uses without spinning up Tk.
+FLOW_MIN_QUALITY = 0.40
+FLOW_MIN_VALID_POINTS = 10
+
+# --- Physiological gates for the optical-flow channel ------------------
+# Microtremor is, anatomically, sub-millimetre to a few millimetres of
+# tip motion at 3-12 Hz. On a webcam, the palm spans ~100-200 px, so
+# even a generous 5 mm tip excursion is ~0.05 palm-lengths peak-to-peak.
+# Per-frame **velocity** at 30 fps is bounded by the same physics:
+# anything above ~0.08 palm-lengths/frame (~2.4 palm/sec) is gross
+# voluntary motion, not tremor. We use this as a hard reject on the
+# optical-flow signal and as a soft per-window gross-fraction gate.
+FLOW_MAX_PER_FRAME_DISPLACEMENT = 0.08   # palm-lengths/frame, hard clip
+FLOW_GROSS_FRAME_FRACTION_MAX = 0.20     # if >20% of window frames are gross, pause
+
+
+def gate_flow_for_microtremor(
+    body_dx,
+    body_dy,
+    *,
+    max_per_frame: float = FLOW_MAX_PER_FRAME_DISPLACEMENT,
+    gross_fraction_max: float = FLOW_GROSS_FRAME_FRACTION_MAX,
+):
+    """Reject flow windows that contain physiologically impossible motion.
+
+    Returns ``(allow, reason, gross_fraction, clipped_dx, clipped_dy)``.
+
+    ``allow=False`` means the window contains too much non-tremor motion
+    and the live score should be paused. Clipped arrays are always
+    returned so callers can still draw a chart even when scoring is
+    paused.
+    """
+    import numpy as _np
+
+    dx = _np.asarray(body_dx, dtype=_np.float64)
+    dy = _np.asarray(body_dy, dtype=_np.float64)
+    if dx.size == 0 or dy.size == 0:
+        return False, "no flow samples", 0.0, dx, dy
+
+    mag = _np.hypot(dx, dy)
+    gross_mask = mag > max_per_frame
+    gross_fraction = float(gross_mask.mean())
+
+    # Always clip so the analyzer can't be poisoned by one massive frame
+    clip = float(max_per_frame)
+    cdx = _np.clip(dx, -clip, clip)
+    cdy = _np.clip(dy, -clip, clip)
+
+    if gross_fraction > gross_fraction_max:
+        return (False,
+                f"Too much hand movement for tremor ({int(gross_fraction*100)}% of frames gross)",
+                gross_fraction, cdx, cdy)
+    return True, "flow within physiological range", gross_fraction, cdx, cdy
+
+
+def select_tracking_source(
+    flow_snapshot,
+    flow_status: dict | None,
+    palm_relative_available: bool,
+    *,
+    min_quality: float = FLOW_MIN_QUALITY,
+    min_valid_points: int = FLOW_MIN_VALID_POINTS,
+) -> tuple[str, str]:
+    """Pick the live tremor signal source.
+
+    Returns (source, reason) where source is one of
+    ``"optical_flow"``, ``"mediapipe_palm_body"``, ``"fallback"`` and
+    reason is a short human string for the UI.
+    """
+    if flow_snapshot is None or flow_status is None:
+        if palm_relative_available:
+            return "mediapipe_palm_body", "Optical flow warming up; using landmark"
+        return "fallback", "Waiting for tracking"
+
+    usable = bool(flow_status.get("usable", False))
+    quality = float(flow_status.get("flow_quality", 0.0))
+    pts = int(flow_status.get("valid_points", 0))
+
+    if usable and quality >= min_quality and pts >= min_valid_points:
+        return "optical_flow", f"Optical flow ({pts} pts, q={quality:.2f})"
+    if palm_relative_available:
+        return "mediapipe_palm_body", f"Optical flow weak (q={quality:.2f}); using landmark fallback"
+    return "fallback", "No usable tracking"
 
 
 def classify_hand_motion_state(
@@ -546,6 +648,31 @@ class App:
         self.startup_video_after_id = self.root.after(33, self._startup_video_poll)
 
     # --------------------------------------------------------------- styling
+    
+    def _load_mascot_asset(self, asset_name: str) -> None:
+        """Load mascot image asset into mascot_frame.
+        
+        Falls back gracefully if asset missing; frame remains empty with bg color.
+        """
+        if not hasattr(self, "mascot_frame"):
+            return
+        
+        try:
+            photo = assets.load_asset_image(asset_name, size=(60, 60))
+            if photo is None:
+                # No asset file; leave frame empty but styled
+                return
+            
+            # Clear frame and add image label
+            for child in self.mascot_frame.winfo_children():
+                child.destroy()
+            
+            img_label = Label(self.mascot_frame, image=photo, bg=SURFACE, borderwidth=0)
+            img_label.pack(fill="both", expand=True)
+            img_label.image = photo  # Keep reference
+            self.mascot_photo = photo
+        except Exception as e:
+            print(f"[MASCOT] Failed to load {asset_name}: {e}", flush=True)
     def _configure_ttk_styles(self) -> None:
         s = ttk.Style()
         try:
@@ -586,6 +713,12 @@ class App:
 
     # ------------------------------------------------------------- layout
     def _build_layout(self) -> None:
+        if MOTIONBLOOM_UI_EXPERIMENTAL and HAS_CTK:
+            self._build_layout_experimental()
+        else:
+            self._build_layout_legacy()
+
+    def _build_layout_legacy(self) -> None:
         # Root split: sidebar | main area (topbar + notebook + footer)
         root_grid = Frame(self.root, bg=BG)
         root_grid.pack(fill="both", expand=True)
@@ -615,6 +748,166 @@ class App:
         self._build_footer(main)
         # Select home
         self._select_nav(0)
+
+    def _build_layout_experimental(self) -> None:
+        """CTkFrame-based shell wrapper (experimental).
+        
+        Wraps sidebar + topbar in CTkFrames, but keeps tab bodies as plain Tk
+        to preserve matplotlib, canvas, and video widgets without porting.
+        """
+        # Root split: sidebar | main area
+        root_grid = ctk.CTkFrame(self.root, fg_color=theme.BG)
+        root_grid.pack(fill="both", expand=True)
+        root_grid.columnconfigure(1, weight=1)
+        root_grid.rowconfigure(0, weight=1)
+
+        self._build_sidebar_experimental(root_grid)
+
+        main = ctk.CTkFrame(root_grid, fg_color=theme.BG)
+        main.grid(row=0, column=1, sticky="nsew")
+        main.columnconfigure(0, weight=1)
+        main.rowconfigure(1, weight=1)
+        self._main = main
+
+        self._build_topbar_experimental(main)
+
+        # Keep notebook as plain Tk (ttk.Notebook) for tab body compatibility
+        self.nb = ttk.Notebook(main, style="Hidden.TNotebook")
+        self.nb.grid(row=1, column=0, sticky="nsew",
+                     padx=24, pady=(0, 8))
+        self.nb.bind("<<NotebookTabChanged>>",
+                     lambda _e: self._on_tab_change())
+
+        self._build_live_tab()
+        self._build_video_tab()
+        self._build_reports_tab()
+
+        self._build_footer_experimental(main)
+        # Select home
+        self._select_nav(0)
+
+    def _build_sidebar_experimental(self, parent: ctk.CTkFrame) -> None:
+        """CTk sidebar wrapper with rounded corners and dark theme."""
+        rail = ctk.CTkFrame(parent, fg_color=theme.SIDEBAR_BG, width=260)
+        rail.grid(row=0, column=0, sticky="ns")
+        rail.grid_propagate(False)
+        rail.columnconfigure(0, weight=1)
+
+        # Brand
+        brand = ctk.CTkFrame(rail, fg_color=theme.SIDEBAR_BG)
+        brand.grid(row=0, column=0, sticky="ew", padx=20, pady=(24, 22))
+        logo = make_logo(brand, size=44, bg=theme.SIDEBAR_BG)
+        logo.pack(side="left")
+        wm = ctk.CTkFrame(brand, fg_color=theme.SIDEBAR_BG)
+        wm.pack(side="left", padx=(12, 0))
+        Label(wm, text="MotionBloom",
+              font=(theme.FONT_FAMILY, 17, "bold"),
+              fg=theme.SIDEBAR_TEXT, bg=theme.SIDEBAR_BG).pack(anchor="w")
+        Label(wm, text="Simple hand check",
+              font=(theme.FONT_FAMILY, 11),
+              fg=theme.GOLD, bg=theme.SIDEBAR_BG).pack(anchor="w")
+
+        # Nav section label
+        Label(rail, text="MAIN",
+              font=(theme.FONT_FAMILY, 9, "bold"),
+              fg=theme.SIDEBAR_MUTED, bg=theme.SIDEBAR_BG,
+              anchor="w").grid(row=1, column=0, sticky="ew",
+                               padx=22, pady=(0, 8))
+
+        items = [
+            ("Check My Hand", "●"),
+            ("Video", "▶"),
+            ("Reports", "≡"),
+        ]
+        self._nav_buttons: list[Frame] = []
+        nav = ctk.CTkFrame(rail, fg_color=theme.SIDEBAR_BG)
+        nav.grid(row=2, column=0, sticky="ew", padx=12)
+        for i, (label, glyph) in enumerate(items):
+            self._nav_buttons.append(
+                self._make_nav_item_experimental(nav, i, label, glyph))
+
+        # Spacer + footer with status chip
+        spacer = ctk.CTkFrame(rail, fg_color=theme.SIDEBAR_BG)
+        spacer.grid(row=3, column=0, sticky="nsew")
+        rail.rowconfigure(3, weight=1)
+
+        foot = ctk.CTkFrame(rail, fg_color=theme.SIDEBAR_BG)
+        foot.grid(row=4, column=0, sticky="ew", padx=18, pady=18)
+        self.status_var = StringVar(value="Idle")
+        self.status_chip = Label(
+            foot, textvariable=self.status_var,
+            bg=theme.SIDEBAR_ALT, fg=theme.SIDEBAR_TEXT,
+            padx=14, pady=10,
+            font=(theme.FONT_FAMILY, 12, "bold"),
+            anchor="w")
+        self.status_chip.pack(fill="x")
+        self.fps_var = StringVar(value="- fps")
+        Label(foot, textvariable=self.fps_var,
+              fg=theme.SIDEBAR_MUTED, bg=theme.SIDEBAR_BG,
+              font=(theme.FONT_FAMILY, 9)).pack(anchor="w", pady=(6, 0))
+        self.tracking_source_var = StringVar(value="Source: -")
+        Label(foot, textvariable=self.tracking_source_var,
+              fg=theme.SIDEBAR_MUTED, bg=theme.SIDEBAR_BG,
+              font=(theme.FONT_FAMILY, 9)).pack(anchor="w", pady=(4, 0))
+        self.flow_status_var = StringVar(value="Flow: -")
+        Label(foot, textvariable=self.flow_status_var,
+              fg=theme.SIDEBAR_MUTED, bg=theme.SIDEBAR_BG,
+              font=(theme.FONT_FAMILY, 9)).pack(anchor="w", pady=(2, 0))
+
+    def _make_nav_item_experimental(self, parent: ctk.CTkFrame, index: int,
+                       label: str, glyph: str) -> ctk.CTkFrame:
+        """CTk nav item with rounded corners and hover effects."""
+        row = ctk.CTkFrame(parent, fg_color=theme.SIDEBAR_BG, cursor="hand2")
+        row.pack(fill="x", pady=4)
+        inner = ctk.CTkFrame(row, fg_color=theme.SIDEBAR_BG)
+        inner.pack(fill="x", padx=14, pady=12)
+
+        g = Label(inner, text=glyph, fg=theme.SIDEBAR_MUTED, bg=theme.SIDEBAR_BG,
+              font=(theme.FONT_FAMILY, 16, "bold"))
+        g.pack(side="left")
+        t = Label(inner, text=label, fg=theme.SIDEBAR_TEXT, bg=theme.SIDEBAR_BG,
+              font=(theme.FONT_FAMILY, 13), anchor="w")
+        t.pack(side="left", padx=(12, 0), fill="x", expand=True)
+
+        # Store widgets and state for _select_nav() compatibility
+        row._children_refs = (inner, g, t)  # type: ignore[attr-defined]
+        row._index = index  # type: ignore[attr-defined]
+        row._selected = False  # type: ignore[attr-defined]
+
+        # Bind click to nav selection
+        def click_nav(e, idx=index):
+            self._select_nav(idx)
+
+        for w in (row, inner, g, t):
+            w.bind("<Button-1>", click_nav)
+        return row
+
+    def _build_topbar_experimental(self, parent: ctk.CTkFrame) -> None:
+        """CTk topbar with rounded corners."""
+        topbar = ctk.CTkFrame(parent, fg_color=theme.BG, height=80)
+        topbar.grid(row=0, column=0, sticky="ew", padx=24, pady=(16, 8))
+        topbar.columnconfigure(1, weight=1)
+
+        title = ctk.CTkLabel(topbar, text="MotionBloom",
+                            font=(theme.FONT_FAMILY, 24, "bold"),
+                            text_color=theme.TEXT)
+        title.pack(side="left")
+
+        badge = ctk.CTkLabel(topbar, text="🔒 Private & local",
+                            font=(theme.FONT_FAMILY, 11),
+                            text_color=theme.MUTED)
+        badge.pack(side="right")
+
+    def _build_footer_experimental(self, parent: ctk.CTkFrame) -> None:
+        """CTk footer with rounded corners."""
+        footer = ctk.CTkFrame(parent, fg_color=theme.BG)
+        footer.grid(row=2, column=0, sticky="ew", padx=24, pady=(8, 16))
+        footer.columnconfigure(0, weight=1)
+
+        label = ctk.CTkLabel(footer, text="© 2024 MotionBloom. MIT License.",
+                            font=(theme.FONT_FAMILY, 9),
+                            text_color=theme.MUTED)
+        label.pack(side="left")
 
     # ----------------------------------------------------------- sidebar
     def _build_sidebar(self, parent: Frame) -> None:
@@ -675,6 +968,15 @@ class App:
         Label(foot, textvariable=self.fps_var,
               fg=SIDEBAR_MUTED, bg=SIDEBAR_BG,
               font=(FONT_FAMILY, 9)).pack(anchor="w", pady=(6, 0))
+        # Tracking source diagnostics: optical_flow / mediapipe_landmark / fallback
+        self.tracking_source_var = StringVar(value="Source: -")
+        Label(foot, textvariable=self.tracking_source_var,
+              fg=SIDEBAR_MUTED, bg=SIDEBAR_BG,
+              font=(FONT_FAMILY, 9)).pack(anchor="w", pady=(4, 0))
+        self.flow_status_var = StringVar(value="Flow: -")
+        Label(foot, textvariable=self.flow_status_var,
+              fg=SIDEBAR_MUTED, bg=SIDEBAR_BG,
+              font=(FONT_FAMILY, 9)).pack(anchor="w", pady=(2, 0))
 
     def _make_nav_item(self, parent: Frame, index: int,
                        label: str, glyph: str) -> Frame:
@@ -725,7 +1027,15 @@ class App:
             row._selected = selected  # type: ignore[attr-defined]
             inner, glyph, text = row._children_refs  # type: ignore[attr-defined]
             bg = SIDEBAR_ACTIVE if selected else SIDEBAR_BG
-            inner.configure(bg=bg)
+            
+            # Handle both Tk Frame (legacy) and CTkFrame (experimental)
+            # Try Tk Frame method first (bg), then CTkFrame method (fg_color)
+            try:
+                inner.configure(bg=bg)
+            except (TypeError, ValueError):
+                # Fall back to CTkFrame method (fg_color)
+                inner.configure(fg_color=bg)
+            
             glyph.configure(bg=bg,
                             fg=RED if selected else SIDEBAR_MUTED)
             text.configure(bg=bg,
@@ -821,6 +1131,47 @@ class App:
             justify="left",
         ).pack(anchor="w")
 
+    def make_ctk_card(self, parent, padding: int = 16, alt: bool = False):
+        """
+        Premium styled card widget with graceful CTkFrame fallback.
+        Returns object with .inner attribute for content placement.
+        Uses CTkFrame with shadow & rounded corners if experimental mode + CTk available, else Tk Frame.
+        """
+        # If not experimental or CTk not available, fall back to original make_card()
+        if not MOTIONBLOOM_UI_EXPERIMENTAL or not HAS_CTK:
+            return make_card(parent, padding=padding, alt=alt)
+        
+        # Experimental path: premium CTkFrame styling
+        from motionbloom.ui import theme
+        
+        bg = SURFACE_ALT if alt else SURFACE
+        
+        # Outer frame: shadow/border effect with rounded corners
+        outer = ctk.CTkFrame(
+            parent,
+            fg_color=theme.BORDER,  # Subtle red border as shadow
+            corner_radius=theme.CTK_FRAME_CORNER_RADIUS,
+            border_width=0
+        )
+        
+        # Inner content frame: actual background with rounded corners
+        inner = ctk.CTkFrame(
+            outer,
+            fg_color=bg,
+            corner_radius=theme.CTK_FRAME_CORNER_RADIUS - 2,
+            border_width=0
+        )
+        # Pack with 1px border spacing to show shadow effect
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+        
+        # Content wrapper: apply padding
+        content = ctk.CTkFrame(inner, fg_color=bg, corner_radius=0, border_width=0)
+        content.pack(fill="both", expand=True, padx=padding, pady=padding)
+        
+        # Attach content as .inner for compatibility
+        outer.inner = content  # type: ignore[attr-defined]
+        return outer
+
     # ---------------------------------------------------------- Live tab
     def _build_live_tab(self) -> None:
         tab = Frame(self.nb, bg=BG)
@@ -864,19 +1215,19 @@ class App:
         right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=1)
 
-        hero = make_card(right, padding=20)
+        hero = self.make_ctk_card(right, padding=20)
         hero.grid(row=0, column=0, sticky="ew")
         inner = hero.inner
-        inner.columnconfigure(0, weight=1)
+        inner.columnconfigure(0, weight=0)  # Mascot (fixed)
+        inner.columnconfigure(1, weight=1)  # Content (flexible)
 
-        section_title(inner, "Today’s Live Reading").grid(row=0, column=0, sticky="w")
         Label(
             inner,
             text="Movement Score",
             fg=TEXT,
             bg=SURFACE,
             font=(FONT_FAMILY, 18, "bold"),
-        ).grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ).grid(row=1, column=1, sticky="w", pady=(10, 0))
 
         self.score_var = StringVar(value="-")
         self.score_lbl = Label(
@@ -886,7 +1237,7 @@ class App:
             fg=TEXT,
             bg=SURFACE,
         )
-        self.score_lbl.grid(row=2, column=0, sticky="w", pady=(0, 0))
+        self.score_lbl.grid(row=2, column=1, sticky="w", pady=(0, 0))
 
         Label(
             inner,
@@ -894,7 +1245,7 @@ class App:
             fg=MUTED,
             bg=SURFACE,
             font=(FONT_FAMILY, 13),
-        ).grid(row=3, column=0, sticky="w")
+        ).grid(row=3, column=1, sticky="w")
 
         self.verdict_var = StringVar(value="Place your hand in view. The camera starts automatically.")
         self.verdict_lbl = Label(
@@ -907,11 +1258,18 @@ class App:
             pady=14,
             anchor="w",
             justify="left",
-            wraplength=420,
+            wraplength=320,
         )
-        self.verdict_lbl.grid(row=4, column=0, sticky="ew", pady=(16, 0))
+        self.verdict_lbl.grid(row=4, column=1, sticky="ew", pady=(16, 0))
+        
+        # Mascot frame (left column, anchored at top-left)
+        self.mascot_frame = Frame(inner, bg=SURFACE, width=80, height=80)
+        self.mascot_frame.grid(row=0, column=0, sticky="nw", rowspan=5, padx=(0, 16), pady=(0, 0))
+        self.mascot_frame.grid_propagate(False)  # Keep fixed 80x80 size
+        self.mascot_photo = None
+        self._load_mascot_asset("bloom_idle")
 
-        metrics = make_card(right, padding=14)
+        metrics = self.make_ctk_card(right, padding=14)
         metrics.grid(row=1, column=0, sticky="ew", pady=(12, 0))
         mi = metrics.inner
         mi.columnconfigure(1, weight=1)
@@ -953,7 +1311,7 @@ class App:
                 font=(FONT_FAMILY, 13, "bold"),
             ).grid(row=r + 1, column=c * 2 + 1, sticky="e", pady=3)
 
-        reassurance = make_card(right, padding=14, alt=True)
+        reassurance = self.make_ctk_card(right, padding=14, alt=True)
         reassurance.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         Label(
             reassurance.inner,
@@ -2419,6 +2777,27 @@ class App:
         snap_box = self.tracker.snapshot_box_micro(WINDOW_SECONDS)
         snap_palm = self.tracker.snapshot_palm_center(WINDOW_SECONDS)
         snap_relative = self.tracker.snapshot_palm_relative(WINDOW_SECONDS)
+        # --- ROI optical-flow channel (Lucas-Kanade hand interior) ---
+        snap_flow = self.tracker.snapshot_flow(WINDOW_SECONDS)
+        flow_status = self.tracker.get_flow_status()
+        tracking_source, tracking_reason = select_tracking_source(
+            snap_flow, flow_status, palm_relative_available=snap_relative is not None
+        )
+        # Publish to UI immediately so it always reflects current state
+        try:
+            self.tracking_source_var.set(f"Source: {tracking_source}")
+            if flow_status is not None:
+                bg = "yes" if flow_status.get("bg_subtracted") else "no"
+                self.flow_status_var.set(
+                    f"Flow: q={flow_status.get('flow_quality', 0.0):.2f}  "
+                    f"pts={int(flow_status.get('valid_points', 0))}  "
+                    f"surv={flow_status.get('survival_rate', 0.0):.2f}  bg={bg}"
+                )
+            else:
+                self.flow_status_var.set("Flow: warming up")
+        except Exception:
+            pass
+
         palm_gate = None
         if snap_palm is not None:
             _palm_t, raw_palm_x, raw_palm_y, _palm_w, _palm_h, raw_hand_box_size, _palm_quality = snap_palm
@@ -2503,6 +2882,52 @@ class App:
             confidence = None  # No confidence data for single landmark
             mode_str = "Single-Landmark"
         
+        # If optical flow wins, replace the tremor x/y with body-frame
+        # pseudo-position (cumulative sum of frame-to-frame body_dx/dy).
+        # Position semantics keep the existing analyzer (highpass + Welch)
+        # happy without per-axis amplitude recalibration. We keep the
+        # palm-relative `local_*` / `global_*` and gating streams as-is
+        # but interpolate them onto the flow timestamps so all downstream
+        # resampling sees consistent array lengths.
+        if tracking_source == "optical_flow" and snap_flow is not None:
+            (ft, fdx, fdy, fpts, fsurv, fq, fbgx, fbgy) = snap_flow
+            # Physiological gate: reject windows containing motion that
+            # cannot be tremor (whole-arm waves, drops, big repositions).
+            allow_flow, gate_reason, gross_fraction, fdx, fdy = gate_flow_for_microtremor(
+                fdx, fdy,
+            )
+            try:
+                self.flow_status_var.set(
+                    self.flow_status_var.get()
+                    + f"  gross={int(gross_fraction*100)}%"
+                )
+            except Exception:
+                pass
+            if not allow_flow:
+                self._apply_paused_tremor_ui(
+                    HAND_STATE_MOVING_WIDE,
+                    gate_reason,
+                    palm_gate,
+                )
+                return None
+            t_old = np.asarray(t, dtype=np.float64)
+            t = ft
+            x = np.cumsum(fdx)
+            y = np.cumsum(fdy)
+            confidence = fq
+            mode_str = "Optical-Flow"
+            # Re-align palm-relative-derived streams onto the flow grid.
+            if use_palm_relative and local_x is not None and local_y is not None:
+                local_x = np.interp(t, t_old, np.asarray(local_x))
+                local_y = np.interp(t, t_old, np.asarray(local_y))
+            if use_palm_relative and global_x is not None and global_y is not None:
+                global_x = np.interp(t, t_old, np.asarray(global_x))
+                global_y = np.interp(t, t_old, np.asarray(global_y))
+            # ref (hand reference scale) -- align too, so np.median works
+            if isinstance(ref, np.ndarray) and ref.shape == t_old.shape:
+                ref = np.interp(t, t_old, ref)
+            # tracking quality reflects flow quality going forward
+            tracking_quality_value = float(np.median(fq)) if len(fq) else tracking_quality_value
         n_samples = len(t)
         print(f"[analysis] mode={mode_str} n={n_samples} multi_buf={multi_count} single_buf={single_count}")
         
