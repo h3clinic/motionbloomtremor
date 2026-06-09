@@ -40,6 +40,11 @@ Thumbs.db
 # Local agent scratch (screenshots, node compile cache, tmp)
 agent-runs/
 
+# Handharness outputs (generated at runtime)
+handharness/output/
+handharness/node_modules/
+handharness/input/ego2handspose/pretrained_models/
+
 # Env
 .env
 .env.*

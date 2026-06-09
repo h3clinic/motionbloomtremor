@@ -1,0 +1,35 @@
+{
+  "name": "handharness",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "export:pose-views": "node scripts/export_pose_views.js",
+    "export:ten-poses": "node scripts/export_ten_hand_poses.js",
+    "export:tremor-multiview": "node scripts/export_tremor_multiview.js",
+    "capture:peace": "python3 scripts/mediapipe_capture_one_peace.py --output output/mediapipe/peace_pose.json --annotated output/mediapipe/peace_annotated.png --require-peace 1",
+    "capture:peace-dummy": "python3 scripts/generate_dummy_peace_landmarks.py --output output/mediapipe/peace_pose_dummy.json",
+    "blender:check": "BLENDER_BIN=\"${BLENDER_BIN:-/Applications/Blender.app/Contents/MacOS/Blender}\"; if [ ! -x \"$BLENDER_BIN\" ] && [ -x \"$HOME/Applications/Blender.app/Contents/MacOS/Blender\" ]; then BLENDER_BIN=\"$HOME/Applications/Blender.app/Contents/MacOS/Blender\"; fi; if [ -x \"$BLENDER_BIN\" ]; then echo \"BLENDER_BIN=$BLENDER_BIN\"; else echo \"Blender not found. Set BLENDER_BIN or install Blender.app.\"; exit 1; fi",
+    "wrap:peace-dummy": "BLENDER_BIN=\"${BLENDER_BIN:-/Applications/Blender.app/Contents/MacOS/Blender}\"; if [ ! -x \"$BLENDER_BIN\" ] && [ -x \"$HOME/Applications/Blender.app/Contents/MacOS/Blender\" ]; then BLENDER_BIN=\"$HOME/Applications/Blender.app/Contents/MacOS/Blender\"; fi; if [ ! -x \"$BLENDER_BIN\" ]; then echo \"Blender not found. Set BLENDER_BIN or install Blender.app.\"; exit 1; fi; if [ -z \"$HAND_MODEL\" ]; then echo \"Set HAND_MODEL to your rigged .glb/.fbx path\"; exit 1; fi; \"$BLENDER_BIN\" --background --python scripts/blender_apply_one_mediapipe_pose.py -- --input \"$HAND_MODEL\" --pose-json output/mediapipe/peace_pose_dummy.json --rig-map rig_map.json --output-glb output/mediapipe/peace_wrapped_dummy.glb --output-png output/mediapipe/peace_wrapped_dummy.png",
+    "wrap:peace-dummy:attached": "HAND_MODEL=input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb npm run wrap:peace-dummy",
+    "export:four-poses": "python3 scripts/render_four_rigged_hand_poses.py --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --rig-map rig_map.json --output-dir output/four_hand_poses",
+    "export:turntable": "python3 scripts/render_turntable_360.py --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --output-dir output/turntable_360 --views 32",
+    "export:tremor-dataset": "python3 scripts/render_tremor_dataset.py --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --output-dir output/tremor_dataset --intensities 1,20,40,60,80,100 --frames 90 --fps 30 --resolution 512",
+    "export:tremor-dataset:full": "python3 scripts/render_tremor_dataset.py --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --output-dir output/tremor_dataset_full --intensities 1-100 --frames 60 --fps 30 --resolution 384",
+    "dataset:generate": "/Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/generate_tremor_dataset.py -- --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --rig-map rig_map.json --output-dir output/dataset --num-positions 3000 --resolution 512 --intensity-mode uniform",
+    "dataset:generate:quick": "/Applications/Blender.app/Contents/MacOS/Blender --background --python scripts/generate_tremor_dataset.py -- --input input/hand_base/extracted/source/Do_Hand_DetailedRiggedAnimated_shared_16022026.glb --rig-map rig_map.json --output-dir output/dataset_quick --num-positions 6 --resolution 512 --intensity-mode uniform",
+    "workflow:single-model": "echo 'Use blender with scripts/blender_single_model_pose_batch.py (see SINGLE_MODEL_WORKFLOW.md)'",
+    "setup:playwright": "npx playwright install chromium"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.1"
+  }
+}

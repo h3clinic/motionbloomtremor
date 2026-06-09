@@ -1,0 +1,21 @@
+# Dependency directories
+node_modules/
+
+# Generated and large output artifacts
+output/
+input/ego2handspose/pretrained_models/
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS/editor artifacts
+.DS_Store
+.vscode/
+
+# Logs and temp files
+*.log
+*.tmp
+*.bak

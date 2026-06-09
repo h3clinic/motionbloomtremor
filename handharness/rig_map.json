@@ -1,0 +1,11 @@
+{
+  "armature_name": "Do_HandRigged",
+  "wrist": "radius_ulna",
+  "fingers": {
+    "thumb": ["thumb_meta", "thumb_prox", "thumb_dist"],
+    "index": ["index_meta", "index_prox", "index_midd"],
+    "middle": ["midd_meta", "midd_prox", "midd_midd"],
+    "ring": ["ring_meta", "ring_prox", "ring_midd"],
+    "pinky": ["pinky_meta", "pinky_prox", "pinky_midd"]
+  }
+}
