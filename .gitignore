@@ -49,3 +49,8 @@ handharness/input/ego2handspose/pretrained_models/
 .env
 .env.*
 out/
+# Dataset frame sequences (too large for git)
+datasets/synth_tremor_v1/frames/MB_SYNTH_*/
+handharness/output/pose_grid/*.png
+handharness/output/hand_poses/
+handharness/hand_landmarker.task

@@ -1,0 +1,6 @@
+video_id,pose,tremor_type,frequency_hz,amplitude_deg,severity_score
+MB_SYNTH_000001,fist_light,postural,10.0,1.7,30
+MB_SYNTH_000002,palm_up,postural,8.0,3.14,45
+MB_SYNTH_000003,palm_up,rest,5.0,7.69,69
+MB_SYNTH_000004,fist_light,postural,8.0,3.02,43
+MB_SYNTH_000005,postural_hold,essential,6.0,5.17,55
