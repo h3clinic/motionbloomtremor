@@ -18,6 +18,11 @@ dist/
 *.pkg
 *.exe
 
+# Node / Electron
+node_modules/
+electron/out/
+electron/dist/
+
 # IDE / OS
 .vscode/
 .idea/

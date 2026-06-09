@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MotionBloom</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Top Navigation Bar -->
+  <header class="header">
+    <div class="header-content">
+      <div class="logo-section">
+        <img src="../../motionbloom/assets/motionbloom_logo.png" alt="MotionBloom" class="logo" onerror="this.style.display='none'">
+        <div class="brand">
+          <h1>MotionBloom</h1>
+        </div>
+      </div>
+      <!-- stats removed: awaiting real, locally-stored progress -->
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main class="main-layout">
+    <!-- Left Sidebar: cleared, awaiting new buttons -->
+    <aside class="sidebar">
+      <nav class="exercise-list">
+        <button class="exercise-card active" data-tab="home">
+          <div class="exercise-info"><h3>Home</h3></div>
+        </button>
+        <button class="exercise-card" data-tab="video">
+          <div class="exercise-info"><h3>Video Practice</h3></div>
+        </button>
+        <button class="exercise-card" data-tab="focused">
+          <div class="exercise-info"><h3>Focused Practice</h3></div>
+        </button>
+        <button class="exercise-card" data-tab="analytics">
+          <div class="exercise-info"><h3>Analytics</h3></div>
+        </button>
+        <button class="exercise-card" data-tab="test">
+          <div class="exercise-info"><h3>✋ Topology Test</h3></div>
+        </button>
+      </nav>
+    </aside>
+
+    <!-- Home View (no video) -->
+    <section class="home-view" id="home-view">
+      <div class="home-grid">
+        <div class="stat-card streak-card">
+          <div class="stat-card-label">Streak</div>
+          <div class="stat-card-value" id="home-streak">0</div>
+          <div class="stat-card-sub">days in a row</div>
+        </div>
+                <div class="stat-card avg-card">
+          <div class="avg-card-head">
+            <div class="stat-card-label">Average score</div>
+            <select id="avg-range" class="avg-select">
+              <option value="10">Last 10</option>
+              <option value="20">Last 20</option>
+              <option value="30">Last 30</option>
+              <option value="60">Last 60</option>
+              <option value="all">All time</option>
+            </select>
+          </div>
+          <div class="stat-card-value" id="avg-value">—</div>
+          <div class="stat-card-sub" id="avg-sub">no sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Best exercise</div>
+          <div class="stat-card-value" id="best-ex">—</div>
+          <div class="stat-card-sub" id="best-ex-sub">no sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Worst exercise</div>
+          <div class="stat-card-value" id="worst-ex">—</div>
+          <div class="stat-card-sub" id="worst-ex-sub">no sessions yet</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header">
+          <h3>Average score over time</h3>
+          <div class="chart-toggle" id="chart-toggle">
+            <button data-bucket="day" class="active">Days</button>
+            <button data-bucket="week">Weeks</button>
+            <button data-bucket="month">Months</button>
+            <button data-bucket="year">Years</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="score-chart" width="900" height="320"></canvas>
+          <div class="chart-empty" id="chart-empty">No sessions recorded yet.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Center: Camera + Mascot -->
+    <section class="center-panel" id="center-view" style="display:none">
+      <!-- Hero Card with Mascot -->
+      <div class="hero-card">
+        <div class="hero-text">
+          <h2 id="hero-title">Welcome back</h2>
+          <p id="hero-subtitle">Pick an exercise</p>
+        </div>
+      </div>
+
+      <!-- Camera Feed -->
+      <div class="camera-container">
+        <video id="camera" autoplay playsinline muted></video>
+
+        <!-- camera controls removed: awaiting new buttons -->
+      </div>
+
+      <!-- Progress Bar (for exercise stages) -->
+      <div class="progress-container" id="progress-container" style="display:none">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <p class="progress-label" id="progress-label">Preparing...</p>
+      </div>
+    </section>
+
+    <!-- Video Practice View -->
+    <section class="video-view" id="video-view" style="display:none">
+      <div class="video-head">
+        <div>
+          <h2>Video Practice</h2>
+          <p class="video-sub">Load a video from your device. It plays while your hand stays steady and pauses whenever your tremor rises above your personal, continuously adapting threshold.</p>
+        </div>
+        <label class="file-btn">
+          <input type="file" id="video-file" accept="video/*" hidden>
+          <span>Choose video…</span>
+        </label>
+      </div>
+
+      <div class="video-practice-area" id="video-practice-area">
+        <div class="video-stage">
+          <video id="practice-video" playsinline controls style="display:none"></video>
+          <div class="video-empty" id="video-empty">No video loaded. Click &ldquo;Choose video…&rdquo; to begin.</div>
+          <div class="gate-overlay" id="gate-overlay" style="display:none">
+            <div class="gate-overlay-card">
+              <div class="gate-overlay-title">Hold steady</div>
+              <div class="gate-overlay-msg" id="gate-msg"></div>
+            </div>
+          </div>
+          <button class="fs-btn" id="video-fs" type="button" title="Toggle fullscreen">⛶ Fullscreen</button>
+        </div>
+        <aside class="camera-side">
+          <div class="camera-side-label">You</div>
+          <video id="practice-camera" autoplay playsinline muted></video>
+        </aside>
+      </div>
+
+      <div class="gate-readout">
+        <span class="gate-pill" id="gate-status">Idle</span>
+        <div class="gate-stat"><span class="gate-stat-label">Live tremor</span><span class="gate-stat-val" id="gate-live">—</span></div>
+        <div class="gate-stat"><span class="gate-stat-label">Adaptive threshold</span><span class="gate-stat-val" id="gate-threshold">—</span></div>
+      </div>
+    </section>
+
+    <!-- Focused Practice View -->
+    <section class="focused-view" id="focused-view" style="display:none">
+      <div class="focused-stage">
+        <video id="focused-camera" autoplay playsinline muted></video>
+      </div>
+      <aside class="focused-side">
+        <div class="focused-side-top">
+          <div class="focused-kicker">Focused Practice</div>
+          <h2 class="focused-name" id="focused-name">Get ready…</h2>
+          <p class="focused-desc" id="focused-desc">A new exercise will appear. Follow it and hold steady.</p>
+        </div>
+        <div class="focused-side-mid">
+          <div class="focused-ring" id="focused-ring">
+            <div class="focused-ring-val" id="focused-ring-val">0%</div>
+          </div>
+          <div class="focused-status" id="focused-status">Hold steady to fill the ring</div>
+        </div>
+        <div class="focused-side-bottom">
+          <div class="focused-metric"><span class="focused-metric-label">Live tremor</span><span class="focused-metric-val" id="focused-live">—</span></div>
+          <div class="focused-metric"><span class="focused-metric-label">Completed</span><span class="focused-metric-val" id="focused-count">0</span></div>
+          <button class="focused-skip" id="focused-skip" type="button">Skip exercise</button>
+        </div>
+      </aside>
+    </section>
+
+    <!-- Analytics View (no camera) -->
+    <section class="analytics-view" id="analytics-view" style="display:none">
+      <div class="analytics-head">
+        <h2>Analytics</h2>
+        <p class="analytics-sub">Your full practice history — all stored locally on this device.</p>
+      </div>
+
+      <div class="home-grid an-grid">
+        <div class="stat-card streak-card">
+          <div class="stat-card-label">Streak</div>
+          <div class="stat-card-value" id="an-streak">0</div>
+          <div class="stat-card-sub">days in a row</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Total sessions</div>
+          <div class="stat-card-value" id="an-total">0</div>
+          <div class="stat-card-sub" id="an-total-sub">no sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Total practice time</div>
+          <div class="stat-card-value" id="an-time">—</div>
+          <div class="stat-card-sub" id="an-time-sub">no timed sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Avg session length</div>
+          <div class="stat-card-value" id="an-avgdur">—</div>
+          <div class="stat-card-sub" id="an-avgdur-sub">no timed sessions yet</div>
+        </div>
+      </div>
+
+      <div class="home-grid an-grid">
+        <div class="stat-card avg-card">
+          <div class="avg-card-head">
+            <div class="stat-card-label">Average score</div>
+            <select id="an-avg-range" class="avg-select">
+              <option value="10">Last 10</option>
+              <option value="20">Last 20</option>
+              <option value="30">Last 30</option>
+              <option value="60">Last 60</option>
+              <option value="all" selected>All time</option>
+            </select>
+          </div>
+          <div class="stat-card-value" id="an-avg-value">—</div>
+          <div class="stat-card-sub" id="an-avg-sub">no sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Best exercise</div>
+          <div class="stat-card-value" id="an-best-ex">—</div>
+          <div class="stat-card-sub" id="an-best-ex-sub">no sessions yet</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-label">Worst exercise</div>
+          <div class="stat-card-value" id="an-worst-ex">—</div>
+          <div class="stat-card-sub" id="an-worst-ex-sub">no sessions yet</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header">
+          <h3>Average score over time</h3>
+          <div class="chart-toggle" id="an-chart-toggle">
+            <button data-bucket="day" class="active">Days</button>
+            <button data-bucket="week">Weeks</button>
+            <button data-bucket="month">Months</button>
+            <button data-bucket="year">Years</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="an-score-chart" width="900" height="300"></canvas>
+          <div class="chart-empty" id="an-chart-empty">No sessions recorded yet.</div>
+        </div>
+      </div>
+
+      <div class="analytics-row">
+        <div class="chart-card">
+          <h3>Exercise distribution</h3>
+          <div class="an-dist" id="an-dist"><div class="an-empty">No exercises completed yet.</div></div>
+        </div>
+        <div class="chart-card">
+          <h3>Per-exercise breakdown</h3>
+          <div class="an-table" id="an-table"><div class="an-empty">No exercises completed yet.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hand Tracking Test View -->
+    <section class="test-view" id="test-view" style="display:none">
+      <div class="test-stage">
+        <video id="test-camera" autoplay playsinline muted></video>
+        <img id="test-frame" class="test-frame" alt="">
+        <canvas id="test-canvas"></canvas>
+        <div class="test-overlay-pills">
+          <span class="test-pill" id="test-hand-pill">Starting…</span>
+          <span class="test-pill test-pill-fps" id="test-fps-pill">H1 —</span>
+        </div>
+        <!-- Large tremor score on the right of the camera -->
+        <div class="test-score-overlay" id="test-score-overlay">
+          <div class="test-score-label">TREMOR SCORE</div>
+          <div class="test-score-num" id="test-score-num">—</div>
+          <div class="test-score-sub" id="test-score-sub">Starting…</div>
+        </div>
+      </div>
+      <aside class="test-panel">
+        <h2 class="test-panel-title">Topology Test</h2>
+        <p class="test-panel-sub">Landmark-free: optical-flow micro-motion analyzed with persistent homology. Move or shake your hand in view and watch the tremor score and H1 loop respond.</p>
+        <div class="test-metrics">
+          <div class="test-metric-row">
+            <span class="test-metric-label">Tracking</span>
+            <div class="test-bar-wrap"><div class="test-bar-fill" id="test-bar-stability"></div></div>
+            <span class="test-metric-val" id="test-val-stability">—</span>
+          </div>
+          <div class="test-metric-row">
+            <span class="test-metric-label">Tremor score</span>
+            <div class="test-bar-wrap"><div class="test-bar-fill test-bar-red" id="test-bar-intensity"></div></div>
+            <span class="test-metric-val" id="test-val-intensity">—</span>
+          </div>
+          <div class="test-metric-row">
+            <span class="test-metric-label">Peak freq</span>
+            <div class="test-bar-wrap"></div>
+            <span class="test-metric-val" id="test-val-freq">—</span>
+          </div>
+        </div>
+        <div class="test-embed-wrap">
+          <div class="test-embed-label">Phase space &mdash; x(t) vs x(t+&tau;)</div>
+          <canvas id="test-embed" width="252" height="200"></canvas>
+          <div class="test-embed-hint">A loop here = rhythmic tremor</div>
+        </div>
+        <div class="test-status" id="test-status">Starting topology analysis…</div>
+        <pre class="test-debug" id="test-debug" style="display:none"></pre>
+      </aside>
+    </section>
+  </main>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
